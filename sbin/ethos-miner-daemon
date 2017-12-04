@@ -1,0 +1,32 @@
+#!/usr/bin/env php
+<?php
+
+`/opt/ethos/bin/bootlog ethos-miner-daemon`;
+
+@ob_end_clean();
+
+require_once('/opt/ethos/lib/functions.php');
+require_once('/opt/ethos/lib/minerprocess.php');
+
+check_status();
+
+sleep(mt_rand(5,10));
+
+while(true){
+
+        $time = time();
+        $reboot_file = "/opt/ethos/etc/reboot.file";
+        $number = intval(trim(file_get_contents($reboot_file)));
+        $new_number = intval(trim(`/opt/ethos/sbin/ethos-readconf reboots`));
+	$driver = trim(`/opt/ethos/sbin/ethos-readconf driver`);
+
+        if(is_int($new_number) && $number < $new_number){
+                file_put_contents($reboot_file,$new_number);
+                `sudo r`;
+        } else {
+		start_miner();
+		sleep(5);
+        }
+}
+
+?>

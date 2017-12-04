@@ -1,0 +1,46 @@
+#!/bin/bash
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016 - 2017 Dale Chapman, sling00@gmail.com (“Author”).
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack’s owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+
+if [ -z "$1" ];then echo "Do not run this script manually."; exit 1;fi
+
+echo "Machine will reboot once Motherboard firmware update is complete."
+if [ -f "/tmp/newfirmwareisstock" ];then
+        echo ""
+	echo "AFTER FLASH IS COMPLETE, SET COMMON BIOS OPTIONS IN MOTHERBOARD BIOS"
+	echo "EXAMPLES AT: http://ethosdistro.com/kb/#many-gpus"
+	echo "Flash will continue in 5 seconds."
+        echo ""
+fi
+sleep 5
+echo "Flashing motherboard firmware update, DO NOT PRESS ANY KEYS OR POWER OFF THE RIG! PERMANENT DAMAGE WILL OCCUR!"
+echo "After this process completes and machine reboots, you will have SUCCESSFULLY INSTALLED BIOS."
+if [ -f "/tmp/newfirmware" ]; then
+	/bin/bash -c "cd /opt/afulnx64 && sudo /opt/afulnx64/afulnx_64 /tmp/newfirmware /D /Q"
+	if [ "$?" = "0" ];then
+		if [ -f "/tmp/newfirmwareisstock" ];then
+			/bin/bash -c "cd /opt/afulnx64 && sudo /opt/afulnx64/afulnx_64 /tmp/newfirmware /CAF /P /B /N /K /REBOOT"
+		elif [ -f "/tmp/asus-fix" ];then
+			/bin/bash -c "cd /opt/afulnx64 && sudo /opt/afulnx64/afulnx_64 /tmp/newfirmware /CAF /P /B /N /REBOOT"
+		else
+			/bin/bash -c "cd /opt/afulnx64 && sudo /opt/afulnx64/afulnx_64 /tmp/newfirmware /P /B /N /K /REBOOT"
+		fi
+	fi
+fi

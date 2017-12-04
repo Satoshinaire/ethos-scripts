@@ -1,0 +1,3 @@
+#!/bin/bash
+/opt/ethos/bin/hash-monitor
+/opt/ethos/sbin/ethos-stats-daemon refresh

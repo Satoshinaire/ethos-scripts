@@ -1,0 +1,56 @@
+#!/bin/bash
+`/opt/ethos/bin/bootlog gpu-info`;
+DRIVER=$(/opt/ethos/sbin/ethos-readconf driver)
+
+TIMEOUT="timeout -s KILL 10"
+$TIMEOUT lspci -nv > /var/run/ethos/lspci_sample.file
+#finds biggest gpucount (amgdpu, fglrx, nvidia)
+if [ "$DRIVER" = "fglrx" ]; then
+	/opt/ethos/bin/check-xorg
+	$TIMEOUT /usr/local/bin/atitweak -s > /var/run/ethos/atitweak_sample.file
+	$TIMEOUT /usr/bin/aticonfig --lsa > /var/run/ethos/aticonfig_sample.file
+fi
+cat /var/run/ethos/atitweak_sample.file | grep -Po "(^\d+)(?=.)" | wc -l > /var/run/ethos/gpucounts.file
+cat /var/run/ethos/aticonfig_sample.file | egrep -ic 'AMD|67B0|67B1|6939|7300|Series|Supported device' >> /var/run/ethos/gpucounts.file
+cat /var/run/ethos/lspci_sample.file | egrep -ic "0300: 1002:67df|0300: 1002:67ef|0300: 1002:67ff|0300: 1002:699f|0300: 1002:6939|0300: 1002:6863|0300: 1002:6938|0300: 1002:7300|0300: 1002:67b0|0300: 1002:67b1|0300: 1002:67b9|0300: 1002:6658|0300: 1002:665f|0380: 1002:67b9|0300: 1002:687f" >> /var/run/ethos/gpucounts.file
+cat /var/run/ethos/lspci_sample.file | egrep -ic "0300: 10de|0302: 10de" >> /var/run/ethos/gpucounts.file
+#consolidates and stores biggest gpucount in gpucount.file
+cat /var/run/ethos/gpucounts.file | sort -n | tail -1 > /var/run/ethos/gpucount.file
+#finds biggest vram (amdgpu, fglrx, nvidia)
+if [ "$DRIVER" = "nvidia" ];then
+	/opt/ethos/bin/check-xorg
+	sleep 5
+	$TIMEOUT /usr/bin/nvidia-smi --query-gpu=memory.total --format=csv,noheader | cut -d " " -f 1 | awk '{printf "%.0f ",$1/1024 }' | xargs >> /var/run/ethos/vrams.check
+fi
+
+grep -i "video ram" /var/log/Xorg.0.log 2>/dev/null | cut -d":" -f3 | awk '{print $1/1024/1024}' | xargs >> /var/run/ethos/vrams.check
+dmesg | grep -Poi "(?<=amdgpu\:\s)(\d+)(?=M of VRAM)" | awk '{print $1/1024}' | xargs >> /var/run/ethos/vrams.check
+
+#consolidates and stores biggest vrams in vrams.file
+cat /var/run/ethos/vrams.check | sort -n | tail -1 > /var/run/ethos/vrams.file
+
+
+if [ "$DRIVER" = "nvidia" ]; then
+	/usr/bin/nvidia-smi --query-gpu=pci.bus_id,gpu_name,vbios_version --format=csv,noheader | sed -e "s/00000000://g" -e "s/, /:/g" | awk '{print "GPU" i++ ":" $0 ":Unknown"}' > /var/run/ethos/meminfo.file
+	lspci -v | egrep -i "3D|VGA compatible" | grep -i "NVIDIA" |  cut -d " " -f 1,5- | sed -e 's/ NVIDIA Corporation//g' -e 's/ Corporation//g' |  cut -d "(" -f 1 | sed -e 's/\[//g' -e 's/\]//g' -e "s/:00.0//g" > /var/run/ethos/gpulist.raw
+	readarray -t meminfo < /var/run/ethos/meminfo.file
+	readarray -t gpudata < /var/run/ethos/gpulist.raw
+	echo "" > /var/run/ethos/gpulist.file
+	for i in "${!meminfo[@]}"; do
+		meminfo[$i]=$(echo "${meminfo[$i]}" | cut -d":" -f5)
+		echo "${gpudata[$i]}${meminfo[$i]}" >> /var/run/ethos/gpulist.file
+
+	done
+else
+	timeout -s KILL 25 /opt/ethos/bin/amdmeminfo -o -s -q > /var/run/ethos/meminfo.file
+	lspci -nnv | egrep "VGA|Display" | grep "1002" | cut -d"." -f1,3   | sed 's#\[AMD/ATI\]##g' | sed 's/:00. //g' | sed 's/Radeon //g' | sed 's/OEM //g'| sed -e 's/\[1002:....]\s*//g' | cut -d"(" -f1,2 | sed 's/Ellesmere \[RX 470\/480\] (rev c7)/Ellesmere \[RX 480\]/g' | sed 's/Ellesmere \[RX 470\/480\] (rev e7)/Ellesmere \[RX 580\]/g' | sed 's/Ellesmere \[RX 470\/480\] (rev cf)/Ellesmere \[RX 470\]/g' | sed 's/Ellesmere \[RX 470\/480\] (rev ef)/Ellesmere \[RX 570\]/g' | sed 's/Hawaii PRO \[R9 290\] (rev 80)/Hawaii PRO \[R9 390\]/g' | sed 's/Hawaii XT \[R9 290X\] (rev 80)/Hawaii XT \[R9 390X\]/g' | sed 's/Curacao PRO \[R9 270\] (rev 81)/Curacao PRO \[R7 370\]/g' | sed 's/Curacao XT \[R9 270X\] (rev 81)/Curacao XT \[R7 370\]/g' | sed 's/Tonga PRO \[R9 285\] (rev f1)/Tonga PRO \[R9 380\]/g' | sed 's/Tonga XT \[R9 380X\] (rev f1)/Tonga XT \[R9 380X\]/g' > /var/run/ethos/gpulist.raw
+	paste -d' ' /var/run/ethos/gpulist.raw /var/run/ethos/meminfo.file | sed 's/GPU/:/g' | cut -d":" -f1,5,6 | sed 's/:/ /g' | sed 's/\]//g'  |sed 's/\[//g' | sed 's/#//g' | rev | cut -d" " -f2- | rev | sed -e 's/([^()]*)//g' | tr -s " " > /var/run/ethos/gpulist.file
+fi
+
+# at the end of this script execution, the following files will be made for usage in other scripts:
+
+# /var/run/ethos/atitweak_sample.file           COSMETIC, USED IN /opt/ethos/bin/gethelp
+# /var/run/ethos/aticonfig_sample.file          COSMETIC, USED IN /opt/ethos/bin/gethelp
+# /var/run/ethos/lspci_sample.file              COSMETIC, USED IN /opt/ethos/bin/gethelp
+# /var/run/ethos/gpucount.file                  REQUIRED, USED in many places
+# /var/run/ethos/gpulist.file                   REQUIRED, USED in conky and panel

@@ -1,0 +1,6 @@
+#!/bin/bash
+if [[ $EUID -eq 0 ]]; then
+  su ethos -c "/usr/bin/irssi "
+else
+/usr/bin/irssi
+fi

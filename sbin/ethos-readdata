@@ -1,0 +1,313 @@
+#!/bin/bash
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016-2017 Dale Chapman, sling00@gmail.com (“Author”).
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack’s owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+
+export DISPLAY=:0 >/dev/null 2>&1
+
+DRIVER=$(xargs </run/initramfs/driver.conf)
+GPUDATA=/var/run/ethos/gpudata.file
+exec 2>/dev/null
+GPUCOUNT=$(($(cat /var/run/ethos/gpucount.file) - 1))
+TIMEOUT="timeout -s KILL 10"
+if [ -z "$DRIVER" ]; then
+  DRIVER="fglrx"
+fi
+function f.checknvidia(){
+	#This function will provide better handling of the below error which happens when an nvidia gpu crashes.
+	#Unable to determine the device handle for GPU 0000:0D:00.0: GPU is lost.  Reboot the system to recover this GPU
+	BADDATA=$(echo "$1" | grep -c "Unable to determine the device handle" )
+	if [ "$BADDATA" -ge "1" ]; then 
+		#Return 0 and exit so that panel does not get long message.
+		echo "1" > /var/run/ethos/adl_error.file
+		echo "0"
+		exit 0
+	fi
+}
+case $1 in
+	bios )
+		case "$DRIVER" in
+		fglrx | amdgpu )
+			BIOS=$(cut /var/run/ethos/meminfo.file -d":" -f4 | xargs)
+		;;
+		nvidia )
+			BIOS=$(cut /var/run/ethos/meminfo.file -d":" -f5 | xargs)
+		;;
+		esac
+		echo "$BIOS"
+	;;
+	bootmode )
+		if [ $(ls /sys/firmware/efi 2>/dev/null | wc -l) -gt 0 ]; then
+			BOOT_MODE="uefi"
+		else
+			BOOT_MODE="bios"
+		fi
+		echo "$BOOT_MODE"
+	;;
+	core )
+		case "$DRIVER" in
+		fglrx )
+			CORE=$(grep -Po '(?<=engine.clock.)([0-9]*\.?[0-9]*.)(?=MHz,)' "$GPUDATA" | xargs)
+		;;
+		amdgpu )
+			CORE=""
+			for i in $(seq 0 $GPUCOUNT); do
+				DATA=$(grep -i "sclk" /sys/kernel/debug/dri/"$i"/amdgpu_pm_info | grep -Poi "(\d+)" 2> /dev/null | xargs)
+				CORE="$CORE $DATA"
+			done
+		;;
+		nvidia )
+			CORE=$(grep -A25 "gpu:" "$GPUDATA" | grep -Poi "(?<=GPUCurrentClockFreqs:\s)(\d+)" | xargs)
+		;;
+		esac
+		echo "$CORE" | xargs
+	;;
+	connecteddisplays )
+		case "$DRIVER" in
+			fglrx | nvidia)
+				CONNECTED=$(timeout 10 /usr/bin/xrandr | grep " connected" | cut -f3 -d" " | cut -f1 -d"+" | xargs)
+			;;
+			amdgpu )
+				CONNECTED=""
+			;;
+		esac
+		echo "$CONNECTED"
+	;;
+	driveinfo )
+		BOOTDRIVE=$(df | grep "/\$" | awk '{print $1}' | grep -Poi "(?<=/dev/)(...)" | xargs)
+		if [ -d "/dev/disk/by-path" ]; then DT=$( ls -al /dev/disk/by-path | grep -i "usb" | grep -i "$BOOTDRIVE" | wc -l | xargs); fi
+		if [ ! -z "$DT" ]; then if [ "$DT" -ge "1" ]; then DRIVEINFO=$(cat /proc/scsi/usb-storage/* | egrep -i 'Product|Serial Number'| cut -d":" -f2 | sed 's/"//g' | xargs);fi;fi
+		if [ -z "$DRIVEINFO" ]; then DRIVEINFO=$(sudo smartctl -i /dev/"$BOOTDRIVE" | egrep -i 'Device Model|Serial Number' | cut -d":" -f2 | sed 's/"//g' | xargs); fi
+		echo "$DRIVEINFO"
+	;;
+	fan )
+		case "$DRIVER" in
+		fglrx )
+			FAN=$(grep -Po '(?<=fan speed.)(\d+)(?=%)' "$GPUDATA" | xargs)
+		;;
+		amdgpu )
+			FAN=""
+                        for i in $(seq 0 $GPUCOUNT); do
+				HWMONDIR=$(echo /sys/class/drm/card$i/device/hwmon/* | grep -Poi "(?<=hwmon)(\d+)" | xargs)
+				DATA=$(cat /sys/class/drm/card$i/device/hwmon/hwmon$HWMONDIR/pwm1 2> /dev/null | xargs)
+				DATA=$(echo "$DATA/2.55" | bc -l | awk '{printf "%.0f ", $1}' | xargs)
+				FAN="$FAN $DATA"
+			done
+		;;
+		nvidia )
+			FAN=$(grep -A5 "fan:$i" "$GPUDATA" | grep -Poi "(?<=GPUCurrentFanSpeed:\s)(.*)" | xargs)
+		;;
+		esac
+		echo "$FAN" | xargs
+	;;
+	fanrpm )
+		case "$DRIVER" in
+			fglrx )
+				FANRPM=$(grep -Po '(?<=\%.\()(\w+)(?=.RPM)' "$GPUDATA" | xargs)
+			;;
+			amdgpu )
+				
+				FANRPM=""
+	                        for i in $(seq 0 $GPUCOUNT); do
+					HWMONDIR=$(echo /sys/class/drm/card$i/device/hwmon/* | grep -Poi "(?<=hwmon)(\d+)" | xargs)
+					#if [ -e "/sys/class/drm/card$i/device/hwmon/hwmon$HWMONDIR/fan1_input" ]; then
+					#	DATA=$(cat /sys/class/drm/card$i/device/hwmon/hwmon$HWMONDIR/fan1_input 2>/dev/null | xargs)
+					#else
+		  				DATA=$(cat /sys/class/drm/card$i/device/hwmon/hwmon$HWMONDIR/pwm1 2> /dev/null | xargs)
+						DATA=$(echo "$DATA/2.55*45" | bc -l | awk '{printf "%.0f ", $1}' | xargs)
+					#fi
+					FANRPM="$FANRPM $DATA"
+				done
+			;;
+			nvidia )
+				f.checknvidia
+				for i in $(seq 0 $GPUCOUNT); do
+					DATA=$(grep -A5 "fan:$i" "$GPUDATA" | grep -Poi "(?<=GPUCurrentFanSpeedRPM:\s)(.*)" | xargs)
+					if [ -z "$DATA" ];then 
+						DATA=$(grep -A5 "fan:$i" "$GPUDATA" | grep -Poi "(?<=GPUCurrentFanSpeed:\s)(.*)" | xargs)
+						DATA=$(echo "$DATA*45"| bc -l | awk '{printf "%.0f", $1}' | xargs)
+					fi
+					FANRPM="$FANRPM $DATA"
+				done
+			;;
+		esac
+		echo "$FANRPM" | xargs
+	;;
+	mem )
+			case "$DRIVER" in
+				fglrx )
+					MEMORY=$(grep -Po '(?<=memory.clock.)(\d+)(?=MHz,)' "$GPUDATA" | xargs)
+				;;
+				amdgpu )
+					MEMORY=""
+		        		for i in $(seq 0 $GPUCOUNT); do
+						DATA=$(grep -i "mclk" /sys/kernel/debug/dri/"$i"/amdgpu_pm_info | grep -Poi "(\d+)" 2> /dev/null | xargs)
+						MEMORY="$MEMORY $DATA"
+					done
+				;;
+				nvidia )
+					MEMORY=$(grep -A25 "gpu:" "$GPUDATA" | grep -Poi "(?<=GPUCurrentClockFreqs:\s)(.*)" | cut -d"," -f 2 | xargs)
+				;;
+			esac
+			echo "$MEMORY" | xargs
+	;;
+	memstate )
+			case "$DRIVER" in
+				fglrx | nvidia )
+					MEMSTATES=""
+					for i in $(seq 0 $GPUCOUNT); do
+						DATA="1"
+						MEMSTATES="$MEMSTATES $DATA"
+					done
+				;;
+				amdgpu )
+					MEMSTATES=""
+		        		for i in $(seq 0 $GPUCOUNT); do
+                                                DATA=$(grep "\*" /sys/class/drm/card$i/device/pp_dpm_mclk | cut -d":" -f1 2> /dev/null | xargs)
+						MEMSTATES="$MEMSTATES $DATA"
+					done
+				;;
+			esac
+			echo "$MEMSTATES" | xargs
+	;;
+	powertune )
+		case "$DRIVER" in
+			fglrx )
+				POWERTUNE=$(grep -Po '(?<=powertune.)(.*)(?=%)' "$GPUDATA" | xargs)
+			;;
+			amdgpu )
+				for i in $(seq 0 $GPUCOUNT); do
+					DATA=$(tail /sys/class/drm/card$i/device/pp_dpm_sclk | grep -Poi "(\d+)(?:\:\s\d+)(?:MHz\s)(\*)" | grep -Poi "(\d+)(?=\:)" | xargs)
+					POWERTUNE="$POWERTUNE $DATA"
+				done
+			;;
+			nvidia )
+				POWERTUNE=$( cat /var/run/ethos/nvidia-smi-dump.file | tr -s [[:space:]] | grep -Poi "(?<=Performance\sState\s:\sP)(\d+)" | xargs)
+				f.checknvidia "$POWERTUNE"
+			;;
+		esac
+		echo "$POWERTUNE" | xargs
+	;;
+	resolution )
+		case "$DRIVER" in
+			fglrx | nvidia )
+				RES=$(timeout -s KILL 10 /usr/bin/xrandr | grep current | cut -d" " -f 8,10 | cut -d"," -f1 | xargs)
+			;;
+			amdgpu )
+				RES=""
+			;;
+		esac
+		echo "$RES"
+	;;
+	temps )
+		case "$DRIVER" in
+			fglrx )
+				TEMPS=$(grep -Po '(?<=temperature.)(\d+|\d+\.\d+)(?= C)' "$GPUDATA" | awk '{printf "%.2f ", $1}' | xargs)
+			;;
+			amdgpu )
+				TEMPS=""
+	                        for i in $(seq 0 $GPUCOUNT); do
+					HWMONDIR=$(echo /sys/class/drm/card$i/device/hwmon/* | grep -Poi "(?<=hwmon)(\d+)" | xargs)
+					DATA=$(cat /sys/class/drm/card$i/device/hwmon/hwmon$HWMONDIR/temp1_input 2> /dev/null | xargs)
+					DATA=$(echo "$DATA/1000" | bc -l | awk '{printf "%.2f ", $1}' | xargs)
+					TEMPS="$TEMPS $DATA"
+				done
+			;;
+			nvidia )
+				TEMPS=$(grep -A20 "gpu:" "$GPUDATA" | grep -Poi "(?<=GPUCoreTemp:\s)(.*)" | xargs)
+			;;
+		esac
+		echo "$TEMPS" | xargs
+	;;
+	watts )
+		case "$DRIVER" in
+			amdgpu )
+				for i in $(seq 0 $GPUCOUNT); do
+					DATA=$(cat /sys/kernel/debug/dri/$i/amdgpu_pm_info | grep -A6 "GFX Clocks and Power:" | grep "(average GPU)" | xargs | cut -d" " -f1 | awk '{printf "%.2f ", $1}' | xargs)
+					if [ -z "$DATA" ]; then
+						DATA="0.00"
+					fi
+					WATTS="$WATTS $DATA"
+				done
+			;;
+			fglrx)
+				if [ ! -z "$GPUCOUNT" ];then
+					for i in $(seq 0 $GPUCOUNT); do
+						DATA="0.00"
+						WATTS="$WATTS $DATA"
+					done
+				else
+					echo ""
+				fi	
+			;;
+			nvidia )
+				f.checknvidia
+				WATTS=$(cat /var/run/ethos/nvidia-smi-dump.file  | tr -s [[:space:]] | grep -Poi "(?<=Power Draw\s:\s)(\d+\.\d+)" | xargs)
+			;;
+		esac
+		echo "$WATTS" |xargs
+	;;
+	voltage )
+		case "$DRIVER" in
+			fglrx )
+				VOLTAGE=$(grep -Po "(?<=core voltage.)(.*)(?=VDC)" "$GPUDATA" | xargs)
+			;;
+			amdgpu )
+				for i in $(seq 0 "$GPUCOUNT"); do
+					DATA=$(xargs </sys/class/drm/card$i/device/pp_voltage)
+					if [ "${#DATA}" = 4 ];then
+ 						DATA=$(echo "$DATA / 1000" | bc -l | awk '{printf "%.3f", $1}' )
+					elif [ "${#DATA}" = 3 ];then
+						DATA="0.$DATA"
+					fi
+					if [ -z "$DATA" -o "$DATA" = "0" ];then
+						DATA="0.000"
+					fi
+					VOLTAGE="$VOLTAGE $DATA"
+					done
+			;;
+			nvidia)
+				for i in $(seq 0 $GPUCOUNT); do
+					DATA="0.00"
+					VOLTAGE="$VOLTAGE $DATA"
+				done
+			;;
+		esac
+		echo "$VOLTAGE" | xargs
+	;;
+	* )
+		echo ""
+		echo "USAGE: ethos-readdata <value>"
+		echo "========================================================="
+		echo "bios			bios names"
+		echo "connecteddisplays 	resolution of connected display"
+		echo "driveinfo		attached drive info"
+		echo "mem			mem clocks"
+		echo "memstate		current memory states - amdgpu only"
+		echo "core			core clocks"
+		echo "fan			fan speed percentages"
+		echo "fanrpm			fan rpms"
+		echo "powertune		powertune settings"
+		echo "temps			temperatures"
+		echo "watts			watt usage"
+		echo "voltage			voltages"
+		echo "========================================================"
+		exit 1
+	;;
+esac

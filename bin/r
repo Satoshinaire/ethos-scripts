@@ -1,0 +1,22 @@
+#!/bin/bash
+DRIVER=$(/opt/ethos/sbin/ethos-readconf driver)
+
+if [[ $EUID -ne 0 ]]; then
+  case "$DRIVER" in
+    fglrx | nvidia )
+      sudo shutdown -r now
+    ;;
+    amdgpu )
+      sudo /opt/ethos/bin/hard-reboot
+    ;;
+  esac
+else
+  case "$DRIVER" in
+    fglrx | nvidia )
+      shutdown -r now
+    ;;
+    amdgpu )
+      /opt/ethos/bin/hard-reboot
+    ;;
+  esac
+fi

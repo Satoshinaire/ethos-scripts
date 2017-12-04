@@ -1,0 +1,111 @@
+#!/usr/bin/env php
+<?php
+$mb_manu = strtoupper(trim(`/usr/bin/sudo /usr/sbin/dmidecode -t 2 | grep -Poi "(?<=Manufacturer\:\s)(.*)" | cut -d" " -f1`));
+if(preg_match("/ASUS/",$mb_manu)) { $mb_manu = "ASUS"; }
+$mbmodel = trim(`/usr/bin/sudo /usr/sbin/dmidecode -t 2 | grep -Poi "(?<=Product\sName\:\s)(.*)"`);
+if($mbmodel == "B250 MINING EXPERT"){
+	// Due to an incompatibility with the old flasher, we need to modify the model so that the old flasher cannot download the firmware.
+	$mbmodel = "ASUS B250 MINING EXPERT";
+}
+$remote_list = @file_get_contents("http://bios.ethosdistro.com/motherboard-bios/current-bios-list.txt");
+$uefi_version = trim(`/usr/bin/sudo /usr/sbin/dmidecode -t 0 | grep -Poi "(?<=Version:\s)(.*)"`);
+
+function versiontoint($version){
+	$version = str_replace('.','', $version);
+	if( preg_match("/(\D)/", $version) > 0) {
+		$version_alpha = preg_split('//', $version, -1, PREG_SPLIT_NO_EMPTY);
+		foreach($version_alpha as $va){
+			if(!is_int($va)){
+				$vi = $vi . ord($va);
+			} else {
+				$vi = $vi . $va;
+			}
+		}
+	} else {
+		$vi = $version;
+	}
+	return $vi;
+}
+
+function downloadfirmwarefile($url,$md5){
+	$newfirmware = "/tmp/newfirmware";
+	$ff = @file_get_contents("$url");
+	$file_md5 = md5($ff);
+	if($md5 == $file_md5){
+		file_put_contents($newfirmware, $ff);
+		return "/tmp/newfirmware";
+	} else {
+		exit ("Update Aborted: Downloaded Motherboard firmware file md5 does not match server, please try again later.\n");
+	}
+
+}
+
+function getfirmwarelist(){
+	$remote_list = @file_get_contents("http://bios.ethosdistro.com/motherboard-bios/current-bios-list.txt");
+	if ((preg_match("/<[^<]+>/", $remote_list, $m) != 0) || (strlen($remote_list) < 100)) {
+		exit("Update Aborted: Unable get list of available motherboard firmware updates, please try again later.\n");
+	} else {
+		file_put_contents("/tmp/current_bios_list", "$remote_list");
+	}
+	$newfirmware = array_map('str_getcsv', file('/tmp/current_bios_list'));
+	$column_headers = $newfirmware[0];
+	unset($newfirmware[0]);
+	$formatted_data= array();
+	foreach($newfirmware as $row){
+		$row = array_combine($column_headers, $row);
+		array_push($formatted_data,$row);
+	}
+	return $formatted_data;
+}
+
+function updatefirmware($downloadurl,$fwmod,$mb_manu,$mbmodel,$md5,$new_uefi_version){
+	echo "Updating Your Motherboard \"$mb_manu $mbmodel\" to new Motherboard firmware version: $new_uefi_version\n";
+	echo "Downloading Motherboard firmware update file....";
+	downloadfirmwarefile($downloadurl,$md5);
+	echo "Stopping mining....\n";
+	if($fwmod == "S"){
+		file_put_contents("/tmp/newfirmwareisstock", "1");
+	}
+	if($fwmod =="A"){
+		file_put_contents("/tmp/asus-fix", "1");
+	}
+	if(file_get_contents("/opt/ethos/etc/allow.file") > 0) {
+		shell_exec("/opt/ethos/bin/disallow");
+		file_put_contents("/opt/ethos/etc/.disallowedprogramatically", "1");
+	}
+	shell_exec("/opt/ethos/bin/minestop");
+	sleep(3);
+	echo exec("/usr/bin/screen -c /opt/ethos/etc/screenrc.flasher -S firmwareflash /bin/bash -c \"/opt/ethos/sbin/flash-mobofirmware flash \"");
+}
+
+$formatted_data = getfirmwarelist();
+$key = array_search("$mbmodel", array_column($formatted_data, 'Motherboard Model'));
+$download_folder = substr($formatted_data[$key]['Compressed Filename'], 0, strpos($formatted_data[$key]['Compressed Filename'], '.'));
+$md5 = $formatted_data[$key]['md5sum'];
+$flash_filename = $formatted_data[$key]['Flash Filename'];
+$fwmod = $formatted_data[$key]['Modified'];
+$new_uefi_version = $formatted_data[$key]['Latest Version'];
+$encoded = rawurlencode("$mbmodel");
+$encodedmanu = rawurlencode("$mb_manu");
+$downloadurl = "http://bios.ethosdistro.com/motherboard-bios/$encodedmanu/$encoded/$download_folder/$flash_filename";
+$uefi_version_int = versiontoint($uefi_version);
+$new_uefi_version_int = versiontoint($new_uefi_version);
+echo "ethOS Motherboard firmware upgrade utility\n";
+echo "Detected Motherboard: $mbmodel\nCurrent Motherboard Firmware: $uefi_version\n";
+if(!$key){
+	$dmiurl = rawurlencode(trim(`/usr/bin/sudo /usr/sbin/dmidecode -t 0,1,2 | /opt/ethos/bin/pasteit`));
+	$hostname = trim(`/sbin/ifconfig | grep -e HW -e eth0 | head -1 | awk '{print \$NF}' | sed 's/://g' | tail -c 7`);
+	$fwversione = rawurlencode("$uefi_version");
+	$mb_manue = rawurlencode("$mb_manu");
+	@file("http://mobodb.ethosdistro.com/mobo.php?hostname=$hostname&mbmanu=$encodedmanu&mobo=$encoded&curfw=$fwversione&dmi_paste=$dmiurl");
+	exit("\nUpdate Aborted: No Motherboard Bios Found - Log has been posted to support staff.\n");
+} else {
+	echo "Available Motherboard Firmware: $new_uefi_version\n";
+}
+if ($new_uefi_version_int > $uefi_version_int){
+	updatefirmware($downloadurl,$fwmod,$mb_manu,$mbmodel,$md5,$new_uefi_version);
+} else {
+	exit("Update aborted: Motherboard Firmware is already up to date\n");
+}
+?>
+

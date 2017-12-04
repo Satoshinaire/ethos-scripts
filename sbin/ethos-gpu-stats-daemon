@@ -1,0 +1,27 @@
+#!/usr/bin/env php
+<?php
+
+`/opt/ethos/bin/bootlog ethos-gpu-stats-daemon`;
+
+@ob_end_clean();
+	$driver = trim(`/opt/ethos/sbin/ethos-readconf driver`);
+if ($driver == "amdgpu" || $driver == "none" ){
+	exit(0);
+}
+`/opt/ethos/bin/check-xorg`;
+while(true){
+	if($driver == "fglrx"){
+		$atitweak = `timeout -s KILL 5 /usr/local/bin/atitweak -s`;
+		file_put_contents("/var/run/ethos/gpudata.file", $atitweak);
+		sleep(6);
+        }
+	if($driver == "nvidia"){
+		$nvidiadata = `timeout -s KILL 15 /usr/bin/nvidia-settings -c :0 -t -q all`;
+		file_put_contents("/var/run/ethos/gpudata.file", $nvidiadata);
+		$nvidiasmidata = `timeout -s KILL 15 /usr/bin/nvidia-smi -q`;
+		file_put_contents("/var/run/ethos/nvidia-smi-dump.file", $nvidiasmidata);
+		sleep(20);
+	}
+}
+
+?>

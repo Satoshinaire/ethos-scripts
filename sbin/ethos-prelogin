@@ -1,0 +1,16 @@
+#!/bin/bash
+
+`/opt/ethos/bin/bootlog ethos-prelogin`;
+
+/usr/bin/xhost SI:localuser:root
+/usr/bin/xhost local:
+xset s off
+xset -dpms
+RCONFIG="/home/ethos/remote.conf"
+STRING="#comment out or remove the top line to enable single-rig mode"
+DEFAULTPOOL=$(echo $(<$RCONFIG) | grep -c 'http://ethosdistro.com/pool.txt')
+NEEDSMODIFICATION=$(echo $(<$RCONFIG) | grep -c "$STRING")
+if [ "$DEFAULTPOOL" -ge "1" ] && [ "$NEEDSMODIFICATION" -eq "0" ];then
+	echo "$STRING" >> "$RCONFIG"
+fi
+#wmctrl -a "ethOS Terminal"

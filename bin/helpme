@@ -1,0 +1,8 @@
+#!/bin/bash
+cat /etc/motd
+echo -n " Stats Panel:         "
+cat /var/run/ethos/url.file
+echo ""
+echo -n " Current Status:      "
+cat /var/run/ethos/status.file
+echo ""

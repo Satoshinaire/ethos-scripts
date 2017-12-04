@@ -1,0 +1,74 @@
+#!/bin/bash
+mkdir -p /var/run/ethos/bootlogs
+chown -R ethos.ethos /var/run/ethos/bootlogs
+`/opt/ethos/bin/bootlog ethos-set-permissions`;
+if [ $(grep -c "reset-config" /proc/cmdline) -gt 0 ]; then /opt/ethos/bin/reset-config; sleep 1; /opt/ethos/bin/putconf; fi
+if [ -d "/var/log/upstart" ]; then
+  exec 1>>/var/log/upstart/ethos-set-permissions.log
+  exec 2>>/var/log/upstart/ethos-set-permissions.log
+fi
+echo "1" > /proc/sys/kernel/sysrq
+echo "Setting permissions"
+touch /tmp/minercmd 
+touch /var/log/{ethos-overclock.log,rx.log,tx.log}
+touch /var/run/{miner.output,eth-proxy.pid}
+chown -R ethos.ethos /home/ethos
+
+echo -n "" | tee /var/run/ethos/{adl_error.file,amdgpu-perms-set.file,check-xorg.file,config_mode.file,cpuinfo.file,cputemp.file,defaultcore.file,defaultmem.file,defunct.file,driverless.file,dualminer_hashes.file,gpucount.file,gpudata.file,gpu-driver.file,gpulist.file,gpulist.raw,hash.file,hwerror.file,panel.file,meminfo.file,miner_hashes.file,nomine.file,nowatchdog.file,nvidia-smi-dump.file,proxy.output,proxy_error.file,overheat.file,overheatedgpu.file,send_remote.file,stats.file,stats.json,throttled.file,updating.file,url.file,vrams.file,public_ip.file,private_hash.file,gpucounts.file,atitweak_sample.file,aticonfig_sample.file,lspci_sample.file,vrams.check,sgminer.conf,nick.conf,miner.versions,miner.dump,watt_min.file,watt_max.file,motherboard.file,manu.file}
+manu=$(/usr/sbin/dmidecode -t 2 | grep -Poi "(?<=Manufacturer\:\s)(.*)" | cut -d" " -f1 | xargs | tee /var/run/ethos/manu.file)
+
+manuci=$( echo "$manu" | tr '[A-Z]' '[a-z]' )
+match=$( echo "biostar" | tr '[A-Z]' '[a-z]' )
+if [ "$manuci" = "$match" ]; then
+        BG="biostar-theme.png"
+else
+        BG="ethos.png"
+fi
+echo "" | tee /home/ethos/.config/nitrogen/bg-saved.cfg >/dev/null
+cat << EOT | tee -a /home/ethos/.config/nitrogen/bg-saved.cfg >/dev/null
+[:0.0]
+file=/home/ethos/Pictures/$BG
+bgcolor=#1f1f1f
+mode=4
+EOT
+
+for i in `seq 1 20`; do
+cat << EOF | tee -a /home/ethos/.config/nitrogen/bg-saved.cfg >/dev/null
+[:0.$i]
+file=/home/ethos/Pictures/ethos-error.png
+bgcolor=#1f1f1f
+mode=4
+EOF
+done
+
+
+echo -n "" | tee /var/log/gethelp.log
+date +%s > /opt/ethos/etc/check-ro.file
+mkdir -p /var/log/teamviewer12
+chmod 640 /var/log/{ethos-overclock.log,rx.log,tx.log}
+chmod 644 /var/run/ethos/defunct.file
+chmod 664 /opt/ethos/etc/check-ro.file /var/run/miner.output /var/run/ethos/proxy.output
+chmod 666 /var/run/eth-proxy.pid
+chmod 755 /tmp/minercmd
+chmod -R 744 /opt/ethos/etc
+chown -R ethos.ethos /opt/ethos/etc /var/run/ethos
+chown ethos.ethos /var/run/ethos/*
+chown ethos.ethos /var/run/miner.output
+chown ethos.ethos /var/log/{gethelp.log,ethos-overclock.log}
+chown ethos.ethos /opt/ethos/etc/check-ro.file
+chown ethos.ethos /etc/motd
+chown ethos.ethos /tmp/minercmd
+
+echo "0" > /var/run/ethos/updating.file
+echo "0" > /var/run/ethos/nomine.file
+echo "user" > /var/run/ethos/nick.conf
+if [ ! -L "/opt/teamviewer/logfiles" ]; then
+	rm -f /opt/teamviewer/logfiles
+	ln -snf /var/run/teamviewer12 /opt/teamviewer/logfiles
+fi
+
+for i in $(seq 0 16); do echo -n "" > /var/run/ethos/throttled.gpu"$i"; chown ethos.ethos /var/run/ethos/throttled.gpu"$i"; echo -n "" > /var/run/miner."$i".output; chown ethos.ethos /var/run/miner."$i".output; done
+
+
+echo "Done"
+exit 0

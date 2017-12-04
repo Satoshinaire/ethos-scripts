@@ -1,0 +1,24 @@
+#!/bin/bash
+if [[ $EUID -ne 0 ]]; then
+  echo "This script must be run as root, please relaunch using \"sudo repair-ethos-update\""
+  exit 1
+fi
+echo "Repairing ethos-update...."
+wget http://update.ethosdistro.com/ethos-updates/ethos-update/ethos-update.tar.gz -O /tmp/ethos-update.tar.gz
+if [ $? -eq "0" ]; then
+	rm -rf /tmp/ethos-update/
+	mkdir -p /tmp/ethos-update/
+	tar xpf /tmp/ethos-update.tar.gz -C /tmp/ethos-update/
+	if [ $? -eq "0" ]; then
+		rm -rf /opt/ethos-update/*
+		mv /tmp/ethos-update/ethos-update/* /opt/ethos-update/
+		echo "ethos-update repaired, relaunch with \"sudo ethos-update\""
+		rm /tmp/ethos-update.tar.gz
+		rm -rf /tmp/ethos-update/
+	else
+		echo "Failed to extract etho-update tarball. Rerun script to try again."
+	fi
+else 
+echo "Failed to download ethos-update tarball, try again in a few minutes."
+exit 0
+fi

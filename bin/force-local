@@ -1,0 +1,2 @@
+#!/bin/bash
+echo -n "" > /home/ethos/remote.conf && echo "remote config turned off"

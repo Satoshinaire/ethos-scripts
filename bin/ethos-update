@@ -1,0 +1,395 @@
+#!/bin/bash
+# ethOS Update Script
+# LICENSE AGREEMENT
+#
+# File Version See $VERSION Variable (c) 2016 - 2017 Dale Chapman, sling00@gmail.com (“Author”).
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack’s owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+#
+# Version History
+#
+# v1.x - EthOS Release
+# v.1 - Development Release
+#
+# Portions derived from previous work by Author
+#
+# Red Goat License (v) 1.0
+#
+# This file is released under the "Small Goat with Red Eyes" license. Breaking the above license agreement will result in a
+# small goat with red eyes visiting you while you sleep.
+
+if [[ "$EUID" -ne "0" ]]; then echo "This script must be run as root, please rerun as \"sudo ethos-update\""; exit 1; fi
+ORIGINALTTY=$(tty)
+function dot(){ echo -n "." >&3 ; }
+function f.toconsole() { if [ ! -z "$ORIGINALTTY" ] && [ "$ORIGINALTTY" != "not a tty" ];then exec 1>"$ORIGINALTTY"; exec 2>"$ORIGINALTTY"; fi ; }
+function f.tolog() { exec 1>>/tmp/ethos-update.log; exec 2>>/tmp/ethos-update.log ; }
+if [ ! -z "$ORIGINALTTY" ] && [ "$ORIGINALTTY" != "not a tty" ];then exec 3>"$(tty)"; fi
+SCRIPT_VERSION="2.27"
+RELEASEVERSION="1.2.7"
+DEVELOPVERSION="1.2.7"
+DEVELOPVERSION_SUFFIX=""
+SCRIPTINTVERSION=${SCRIPT_VERSION//\./}
+RELEASEINTVERSION=${RELEASEVERSION//\./}
+ETHOSVERSION=$(grep -Poi "(\d+\.\d+\.\d+)" /opt/ethos/etc/version)
+NEWKERNELVERSION="4.8.17-ethos49"
+INTVER=$(grep -Poi "(\d+\.\d+\.\d+)" /opt/ethos/etc/version |sed -e 's/\.//g' )
+HOSTNAME=$(cat /etc/hostname)
+CONF="/home/ethos/local.conf"
+MINER=$(/opt/ethos/sbin/ethos-readconf miner)
+touch /tmp/ethos-update.log; f.tolog
+echo "$(date -u) - ethOS update on $HOSTNAME starting..." |tee /tmp/ethos-update.log
+if [[ "$(cut -d " " -f1 /proc/uptime | cut -d "." -f 1)" -ge "3600" ]]; then f.toconsole; echo "$(date -u) $HOSTNAME - System needs to be rebooted before updating. Please reboot and retry the update." | tee /tmp/ethos-update.log; exit 1; fi
+if [[ "$(ps aux | grep -v 'grep'| grep -c 'defunct')" -gt "0" ]]; then f.toconsole echo "$(date -u) $HOSTNAME - Defunct process(es) found. Please reboot and retry the update." | tee /tmp/ethos-update.log; exit 1; fi
+
+BRANCH=$(grep -Po "(?<=^branch.$HOSTNAME.)(.*)" "$CONF" |xargs)
+if [ -z "$BRANCH" ];then BRANCH=$(grep -Po "(?<=^globalbranch.)(.*)" "$CONF" |xargs); fi
+if [ -z "$BRANCH" ];then BRANCH="release"; fi
+if [ "$BRANCH" = "development" ];then 
+	NEWVERSION="$DEVELOPVERSION"; NEWVERSION_NUMBER="$DEVELOPVERSION$DEVELOPVERSION_SUFFIX"
+else
+	NEWVERSION="$RELEASEVERSION"; NEWVERSION_NUMBER="$RELEASEVERSION"
+fi
+#Helper functions / processes below
+function f.err(){
+	f.toconsole; echo "$(date -u) ERROR: Update on $HOSTNAME failed, Reason: $1" | tee -a /tmp/ethos-update.log
+	case "$2" in
+		reboot )
+			echo "Reboot system and try again." | tee -a /tmp/ethos-update.log
+		;;
+		rerun )
+			echo "rerun update with: \"sudo ethos-update\"" | tee -a /tmp/ethos-update.log
+		;;
+	esac
+	exit 1
+}
+
+SERVERS=( $(getent hosts update.ethosdistro.com | cut -d " " -f 1) $(getent hosts update2.ethosdistro.com | cut -d " " -f 1) 162.243.39.238 162.243.72.18 )
+for v in "${!SERVERS[@]}"; do
+	HEADER=$(curl -m 5 -so /dev/stderr -w "%{http_code}" "http://${SERVERS[$v]}/status/" 2>/dev/null)
+	STATUS=$(curl -m 5 -fsSk http://"${SERVERS[$v]}"/status/ 2>/dev/null)
+	if [ "$HEADER" = "200" ] && [ "$STATUS" == "online" ]; then VALIDSERVERS[$v]="${SERVERS[$v]}"; fi
+done
+if [ "${#VALIDSERVERS[@]}" -eq "0" ]; then echo "Update servers are unreachable. Please check your network connection, or try again later."; exit 1; fi
+rand=$[ $RANDOM % ${#VALIDSERVERS[@]} ]; SERVER="http://${VALIDSERVERS[$rand]}/"
+echo "Using update server: $SERVER" >> /tmp/ethos-update.log
+SCRIPT_NEW_VERSION="$(curl -f -s -S -k "$SERVER"/ethos-updates/version/version |sed -e 's/\.//g')"
+
+echo "Checking if ethos-update is up to date........"
+if [ "$SCRIPT_NEW_VERSION" -gt "$SCRIPTINTVERSION" ]; then
+	echo "Getting latest version of ethos-update"		
+	curl -o /tmp/ethos-update.tar.xz "$SERVER"/ethos-updates/ethos-update/ethos-update.tar.xz
+	if [ "$?" = "0" ]; then 
+		rm -rf /tmp/ethos-update/; mkdir -p /tmp/ethos-update/; tar xpf /tmp/ethos-update.tar.xz -C /tmp/ethos-update/
+		if [ "$?" = "0" ]; then
+			rm -rf /opt/ethos-update/*; mv /tmp/ethos-update/ethos-update/* /opt/ethos-update/
+			echo "Updated to latest version, relaunching."
+			rm -f /tmp/ethos-update.tar.{gz,xz}; rm -rf /tmp/ethos-update/; cd ~
+			if [ ! -z "$1" ]; then
+				exec /opt/ethos-update/ethos-update "$1"
+			else
+				exec /opt/ethos-update/ethos-update
+			fi
+  		else
+			f.err "Failed to extract etho-update package" "rerun"
+  		fi
+	else
+		f.err "Failed to download updater package" "rerun"
+	fi
+else
+	echo "Script up to date"
+fi
+
+function f.checkdpkg(){
+	DPKGLOCKED=$(lsof /var/lib/dpkg/lock 2>/dev/null | grep -c "/var/lib/dpkg/lock"); WAITCOUNT="0"
+	if [ "$DPKGLOCKED" -ge "1" ];then
+		until [ "$DPKGLOCKED" = "0" ] || [ "$WAITCOUNT" = "60" ]; do
+			DPKGLOCKED=$(lsof /var/lib/dpkg/lock 2>/dev/null | grep -c "/var/lib/dpkg/lock"); ((WAITCOUNT++))
+		done
+	fi
+	if [ "$WAITCOUNT" -ge "120" ]; then echo "Timed out waiting on dpkg lock to clear."; echo "manually clearing dpkg lock"; rm -f /var/lib/dpkg/lock; fi
+}
+
+function f.getpackage(){
+	if [ "$INTVER" -lt "126" ];then
+		mkdir -p /tmp/ethos-1.2.6-files
+		curl -o /tmp/ethos-1.2.6-files.tar.xz "$SERVER"/packages/1.2.6/ethos-1.2.6-files.tar.xz
+		if [ "$?" -ne "0" ];then f.err "Download of extras tarball failed" "rerun"; fi
+		tar xf /tmp/ethos-1.2.6-files.tar.xz -C /tmp/ethos-1.2.6-files/
+		if [ "$?" -ne "0" ];then f.err "Extraction of extras tarball failed" "rerun"; fi
+		cd /tmp/ethos-1.2.6-files; md5sum -c /tmp/ethos-1.2.6-files/md5sum.txt
+		if [ "$?" -ne "0" ];then f.err "md5sum of files in extras tarball failed" "rerun"; fi
+	fi
+	if [ "$INTVER" -lt "124" ];then
+		mkdir -p /tmp/ethos-1.2.4-files
+		curl -o /tmp/ethos-1.2.4-files.tar "$SERVER"/packages/1.2.4/ethos-1.2.4-files.tar
+		if [ "$?" -ne "0" ];then f.err "Download of extras tarball failed" "rerun"; fi
+		tar xf /tmp/ethos-1.2.4-files.tar -C /tmp/ethos-1.2.4-files/
+		if [ "$?" -ne "0" ];then f.err "Extraction of extras tarball failed" "rerun"; fi
+		cd /tmp/ethos-1.2.4-files; md5sum -c /tmp/ethos-1.2.4-files/md5sum.txt
+		if [ "$?" -ne "0" ];then f.err "md5sum of files in extras tarball failed" "rerun"; fi
+	fi
+	if [ "$INTVER" -lt 121 ]; then
+		mkdir -p /tmp/ethos-1.2.1-files
+		curl -o /tmp/ethos-1.2.1-files.tar "$SERVER"/packages/1.2.1/ethos-1.2.1-files.tar
+		if [ "$?" -ne "0" ];then f.err "Download of extras tarball failed" "rerun"; fi
+		tar xf /tmp/ethos-1.2.1-files.tar -C /tmp/ethos-1.2.1-files/
+		if [ "$?" -ne "0" ];then f.err "Extraction of extras tarball failed" "rerun"; fi
+		cd /tmp/ethos-1.2.1-files; md5sum -c /tmp/ethos-1.2.1-files/md5sum.txt
+		if [ "$?" -ne "0" ];then f.err "md5sum of files in extras tarball failed" "rerun"; fi
+	fi
+}
+
+function f.setpermissions() {
+	usermod -a -G video ethos; usermod -a -G root ethos
+	chown -R ethos.ethos /home/ethos
+	chown -R root.root /etc/init/ethos-*
+	chown root.root /usr/share/initramfs-tools/scripts/init-top/gpulist; chmod 755 /usr/share/initramfs-tools/scripts/init-top/gpulist
+	chmod 0644 /home/ethos/.bashrc
+	chown root.root /root/{.bashrc,.profile}; chmod 0644 /root/.bashrc
+	chown -R ethos.ethos /opt/{eth-proxy,miners}
+}
+
+function f.latest() {
+	if [ "$BRANCH" = "release" ]; then
+		chown -R ethos.ethos /home/ethos
+		f.toconsole
+		echo "$(date -u) Your version of ethOS is up to date. Version: $ETHOSVERSION"; exit 0
+	else
+		echo "$(date -u) Installing latest development build $DEVELOPVERSION$DEVELOPVERSION_SUFFIX."
+		f.do-update
+	fi
+}
+
+# Main work functions below are run in sequential order.
+function f.prerun() {
+	echo "$(date -u) Running Pre-Update Commands"
+	if [ ! -f "/var/run/ethos/updating.file" ];then mkdir -p /var/run/ethos; touch /var/run/ethos/updating.file; fi
+	echo "1" > /var/run/ethos/updating.file
+	BASE="/opt/ethos-update/updates/$NEWVERSION"
+	f.toconsole
+	echo "$(date -u) Updating ethos to version $NEWVERSION, May take up to $TIMEREQUIRED minutes depending on your connection speed. You can log in on another session and type tail -f /tmp/ethos-update.log to view progress" | tee -a /tmp/ethos-update.log
+	f.tolog
+	ALLOWED=$(cat /opt/ethos/etc/allow.file)
+	echo "$(date -u) Disallowing and stopping mining during the update process..."
+	/opt/ethos/bin/disallow; /opt/ethos/bin/minestop; sleep 5
+	mineralive=$(pgrep "$MINER" | wc -l)
+	if [ "$mineralive" -ge "1" ];then f.err "Unable to terminate mining processes" "reboot"; fi
+	f.getpackage; dot
+	f.checkdpkg; /usr/bin/dpkg --configure -a; dot
+	sync
+}
+
+function f.common-installs(){
+	PACKAGES_MARK=( libssl-dev libssl-doc )
+	PACKAGES_HOLD=(  )
+	REQUIRED_PACKAGES=( php5-curl screen-resolution-extra libjansson4 python3-xkit libc6:i386 libgcc1:i386 libasound2:i386 libdbus-1-3:i386 libexpat1:i386 libfontconfig1:i386 libfreetype6:i386 libjpeg62:i386 libsm6:i386 libxdamage1:i386 libxext6:i386 libxfixes3:i386 libxinerama1:i386 libxrandr2:i386 libxrender1:i386 libxtst6:i386 zlib1g:i386 gcc-7-base:i386 libc6 libc6-dev libc6-i386 libdbus-1-3 libexpat1 libfontconfig1 libfontconfig1:i386 libxrandr2 libx11-6:i386 libxcb1:i386 libxdmcp6:i386 libxau6:i386  libuuid1:i386 libice6:i386 libgcc1 libuuid1 libgcc1 libfreetype6:i386 libfreetype6 libfontconfig1 libexpat1 libc-dev-bin libexpat1-dev fontconfig-config gcc-7-base libpng12-0:i386 libusb-1.0-0-dev )
+	REMOVED_PACKAGES=( xscreensaver xscreensaver-data xscreensaver-data-extra " amdgpu-pro" amdgpu-pro-clinfo amdgpu-pro-computing amdgpu-pro-libopencl1 amdgpu-pro-opencl-icd libdrm-amdgpu-pro-tools libdrm-amdgpu-pro-dev libdrm-amdgpu1 )
+	PKGLIST=$(dpkg -l | tr -s " " | cut -d" " -f2 | xargs) 
+	for i in "${REQUIRED_PACKAGES[@]}"; do
+		PKGINSTALLED=$(echo "$PKGLIST" | grep -c "$i")
+		if [ "$PKGINSTALLED" = "0" ]; then PACKAGES_ADD+=( "$i" ); fi
+	done
+	dot
+	for i in "${REMOVED_PACKAGES[@]}"; do
+		PKGINSTALLED=$(echo "$PKGLIST" | grep -c "$i")
+		if [ "$PKGINSTALLED" -gt "0" ]; then PACKAGES_PURGE+=( "$i" ); fi
+	done
+	echo "Updating apt-get package database....";
+	f.checkdpkg; /usr/bin/apt-get -qq update; dot
+	f.checkdpkg; /usr/bin/apt-get -o Dpkg::Options::="--force-confold" -fy install "${PACKAGES_ADD[@]}"; dot
+	f.checkdpkg; /usr/bin/apt-mark manual "${PACKAGES_MARK[@]}"; dot
+	f.checkdpkg; /usr/bin/apt-mark hold "${PACKAGES_HOLD[@]}"; dot
+	f.checkdpkg; /usr/bin/apt-get -fy purge "${PACKAGES_PURGE[@]}"; dot
+	sync
+}
+
+function f.copycorefiles() {
+	shopt -s globstar;shopt -s dotglob;cd "$BASE";FILES=( $(echo ./** | sed -e 's/\.\///g') )
+	for f in "${FILES[@]}";do
+		if [ -d "$f" ];then
+			#echo "DEBUG: check if DIR $f exists"
+			mkdir -p "/$f"
+		fi
+	done; dot
+	for f in "${FILES[@]}";do
+		if [ -f "$f" ];then
+			#echo "DEBUG: copy file $f to /$f"
+			cp -d "$BASE/$f" "/$f"
+		fi
+	done; dot
+}
+
+function f.extrafiles() {
+	echo "$(date -u) Installing extra files"
+	if [ "$INTVER" -lt "126" ];then
+		dpkg -i /tmp/ethos-1.2.6-files/libcuda1-384_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/nvidia-384_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/nvidia-384-dev_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/nvidia-opencl-icd-384_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/libxnvctrl0_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/nvidia-settings_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/libxnvctrl-dev_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/nvidia-libopencl1-384_384.90-ethos6_amd64.deb \
+		/tmp/ethos-1.2.6-files/ixgbe-dkms_5.2.4_all.deb \
+		/tmp/ethos-1.2.6-files/slimlock-0.11-ethos1_amd64.deb \
+		/tmp/ethos-1.2.6-files/xserver-xorg-core-lts-vivid_1.17.1-0ubuntu3.1~trusty1.1ubuntu1_amd64.deb \
+		/tmp/ethos-1.2.6-files/xserver-xorg-ast_1.0.3-ethos1_amd64.deb
+		REMOVED_PACKAGES2=( linux-image-4.8.17-ethos38 linux-image-4.8.17-ethos23 linux-headers-4.8.17-ethos38 linux-headers-4.8.17-ethos23 linux-firmware-image-4.8.17-ethos38 )
+		PACKAGES_PURGE2=""
+		for i in "${REMOVED_PACKAGES2[@]}"; do
+			PKGINSTALLED=$(echo "$PKGLIST" | grep -c "$i")
+			if [ "$PKGINSTALLED" -gt "0" ]; then PACKAGES_PURGE2+=( "$i" ); fi
+		done
+		if [ ! -z "${PACKAGES_PURGE2[@]}" ]; then
+			f.checkdpkg; /usr/bin/apt-get -fy purge "${PACKAGES_PURGE2[@]}"; dot
+		fi
+	fi
+	if [ "$INTVER" -eq "124" ]; then
+		/usr/sbin/dkms remove fglrx-updates-core/15.201 -k 4.8.17-ethos49
+		sleep 2
+		/usr/sbin/dkms install fglrx-updates-core/15.201 -k 4.8.17-ethos49
+	fi
+	if [ "$INTVER" -lt "124" ];then
+		dpkg -i /tmp/ethos-1.2.4-files/teamviewer_12.0.76279_i386.deb \
+		/tmp/ethos-1.2.4-files/cuda-license-9-0_9.0.103-1_amd64.deb \
+		/tmp/ethos-1.2.4-files/cuda-cudart-9-0_9.0.103-1_amd64.deb \
+		/tmp/ethos-1.2.4-files/kernel/linux-firmware-image-4.8.17-ethos49_4.8.17-ethos49-6_amd64.deb \
+		/tmp/ethos-1.2.4-files/kernel/linux-libc-dev_4.8.17-ethos49-6_amd64.deb \
+		/tmp/ethos-1.2.4-files/kernel/linux-headers-4.8.17-ethos49_4.8.17-ethos49-6_amd64.deb \
+		/tmp/ethos-1.2.4-files/kernel/linux-image-4.8.17-ethos49_4.8.17-ethos49-6_amd64.deb
+	fi
+	if [ "$INTVER" -lt "122" ];then
+		# 1.2.2 specific aticonfig/amdconfig moves
+		mv /usr/bin/aticonfig /usr/bin/aticonfig-real
+		rm -f /usr/bin/{amdconfig,aticonfig}
+		ln -snf /usr/bin/aticonfig /usr/bin/amdconfig
+		cp /opt/ethos-update/updates/1.2.7/usr/bin/aticonfig /usr/bin/aticonfig
+	fi
+	if [ "$INTVER" -lt "121" ];then
+		dpkg -i /tmp/ethos-1.2.1-files/amdgpu-pro/libdrm-amdgpu-pro-amdgpu1_2.4.70-379184-ethos6_amd64.deb \
+  		/tmp/ethos-1.2.1-files/amdgpu-pro/amdgpu-firmware-bin-1.2.1-ethos7_amd64.deb \
+  		/tmp/ethos-1.2.1-files/amdgpu-pro/libopencl1-amdgpu-pro_17.10-410326-ethos7_amd64.deb\
+  		/tmp/ethos-1.2.1-files/amdgpu-pro/opencl-amdgpu-pro-icd_17.10-410326-ethos7_amd64.deb
+		mkdir -p /boot/efi; mkdir -p /opt/efisetup
+		ln -snf /boot/vmlinuz-$NEWKERNELVERSION /boot/ethos-kernel
+		ln -snf /boot/initrd.img-$NEWKERNELVERSION /boot/initrd.img-ethos
+		cp /usr/lib/initramfs-tools/bin/busybox /opt/efisetup/busybox.bak
+		ln -snf /bin/busybox /usr/lib/initramfs-tools/bin
+	fi
+}
+
+function f.postrun() {
+	echo "$(date -u) Running Post-Update Commands";	dot
+	#Update The Proxy
+	killall -9 python
+	rm -rf /opt/eth-proxy
+	mkdir -p /opt/eth-proxy
+	dot
+	tar xjpf /opt/ethos-update/proxy-updates/$NEWVERSION/eth-proxy.tar.bz2 -C /opt/
+	chown -R ethos.ethos /opt/eth-proxy
+	f.checkdpkg; /usr/bin/apt-get -y clean; dot
+	f.checkdpkg; /usr/bin/apt-get -y autoclean; dot
+	f.checkdpkg; /usr/bin/apt-get -fy autoremove; dot
+	f.setpermissions
+	rm -f /opt/miners/claymore-xmr/*_log.txt
+	ln -snf /usr/share/slim/themes/ethos /usr/share/slim/themes/default
+	rm -rf /home/ethos/Pictures/lock
+	if [ ! -f "/opt/ethos/etc/.refind-updated-1.2.7" ]; then
+		rm -f /opt/ethos/etc/.refind-updated-{1.2.4,1.2.6}
+		PARTITION=$(blkid | grep "UUID=\"f96c3164-6f44-43b3-be09-d8cfed4934ea\"" | cut -d":" -f1)
+		DRIVE=${PARTITION: :-1}
+		ESP=$(blkid | grep "$DRIVE" | grep "ESP" | cut -d":" -f1)
+		mount $ESP /boot/efi
+		if [ "$?" = "0" ]; then
+			echo "Mounted efi partition"
+			rm /boot/efi/EFI/BOOT/refind.conf
+			echo "Copying new refind.conf to ESP"
+			cp /opt/efisetup/icon-reset-config.png /boot/efi/EFI/BOOT/icons/icon-reset-config.png
+			cp /opt/efisetup/refind.conf /boot/efi/EFI/BOOT/refind.conf
+			touch /opt/ethos/etc/.refind-updated-1.2.7
+			echo "Syncing disks and unmounting ESP"
+			sync
+			sleep 2
+			umount /boot/efi
+			echo "Done updating uefi loader"
+        	fi
+	fi
+	sed -ie 's/0 1 \* \* \* \/opt\/ethos\/sbin\/cleanup-logs.sh//g' /var/spool/cron/crontabs/root
+	echo "$NEWVERSION_NUMBER" > /opt/ethos/etc/version; dot
+	if [ ! -f "/opt/ethos/etc/allow.file" ];then echo "0" > /opt/ethos/etc/allow.file; fi
+	if [ ! -f "/home/ethos/custom.sh" ];then cp /opt/ethos-update/dist-files/custom.sh /home/ethos/custom.sh; fi
+	if [ ! -f "/opt/ethos/etc/reboot.file" ];then touch /opt/ethos/etc/reboot.file; chmod 664 /opt/ethos/etc/reboot.file; fi
+	DKMSNEEDSREPAIR=$(dkms status| grep -c "fglrx-updates-core, 15.201, $NEWKERNELVERSION, x86_64: installed")
+	if [ "$DKMSNEEDSREPAIR" = "0" ]; then dkms add fglrx-updates-core/15.201; dkms install fglrx-updates-core/15.201 -k $NEWKERNELVERSION; fi
+	DEPRECATED=( "/home/ethos/.xscreensaver" "/opt/ethos/etc/claymore-xmr.stub.conf" "/etc/init/nvidia-persistenced.conf" "/etc/ld.so.conf.d/ethminer.conf" "/var/spool/cron/crontabs/tmp.el7epv" "/usr/share/initramfs-tools/scripts/init-top/driver-selection" "/boot/core.gz" "/boot/vmlinuz-3.0.0-resizer" "/usr/share/initramfs-tools/scripts/init-top/drivers-selection" "/opt/ethos/etc/oldversion" "/opt/ethos/lib/ethosfarmid.php" "/usr/bin/ck-history" "/usr/bin/ck-launch-session" "/usr/bin/ck-list-sessions" "/usr/sbin/console-kit-daemon" "/usr/sbin/ck-log-system-restart" "/usr/sbin/ck-log-system-start"\
+	 "/usr/sbin/ck-log-system-stop" "/etc/X11/Xsession.d/90consolekit" "/etc/logrotate.d/consolekit" "/etc/dbus-1/system.d/ConsoleKit.conf" "/etc/ConsoleKit/seats.d/00-primary.seat" "/usr/share/doc/consolekit" "/usr/lib/ConsoleKit"\
+	 "/usr/share/polkit-1/actions/org.freedesktop.consolekit.policy" "/usr/share/dbus-1/system-services/org.freedesktop.ConsoleKit.service" "/lib/systemd/system/basic.target.wants/console-kit-log-system-start.service"\
+	 "/lib/systemd/system/halt.target.wants/console-kit-log-system-stop.service" "/lib/systemd/system/poweroff.target.wants/console-kit-log-system-stop.service" "/lib/systemd/system/console-kit-daemon.service"\
+	 "/lib/systemd/system/console-kit-log-system-restart.service" "/lib/systemd/system/console-kit-log-system-start.service" "/lib/systemd/system/console-kit-log-system-stop.service" "/lib/systemd/system/reboot.target.wants/console-kit-log-system-restart.service" )
+	for f in "${DEPRECATED[@]}"; do
+		if [ -e "$f" ];then rm -rf "$f"; fi
+	done
+	ldconfig; /usr/sbin/update-initramfs -u; dot; /usr/sbin/update-grub
+	if [ "$ALLOWED" -eq "0" ]; then
+		echo "0" > /opt/ethos/etc/allow.file; echo "$(date -u) - Mining Disallowed before script start, keeping it that way."
+	else
+		echo "1" > /opt/ethos/etc/allow.file; echo "$(date -u) - Mining Allowed before script start, keeping it that way."
+	fi
+	sync; echo "2" > /var/run/ethos/updating.file
+	sleep 10
+	f.toconsole; echo ""; echo "$(date -u) - ethOS Update on $HOSTNAME Finished, please reboot. see /tmp/ethos-update.log for details about what was updated." | tee -a /tmp/ethos-update.log
+	exit 0
+}
+
+function f.do-update(){
+	f.prerun "$@"; f.common-installs "$@"; f.extrafiles "$@"; f.copycorefiles "$@"; f.postrun "$@"
+}
+
+if [ ! -z "$1" ]; then
+	case "$1" in
+		reupdate )
+			if [ "$INTVER" -ge "120" ]; then TIMEREQUIRED="5"; f.do-update "$@"; fi
+		;;
+		* )
+			echo "Invalid commandline argument \"$1\"."
+			echo "Usage:"
+			echo "\"sudo ethos-update\" - Update to latest ethos version"
+			echo "\"sudo ethos-update reupdate\" - Reapply most recent update."
+			exit 0
+		;;
+	esac
+else
+	if [ "$INTVER" -gt "$RELEASEINTVERSION" ]; then ETHOSVERSION="dev"; fi
+fi
+
+case $ETHOSVERSION in
+	1.0 | 1.0.1 | 1.0.2 | 1.0.3 | 1.0.4 | 1.0.5 | 1.0.6 | 1.0.7 | 1.1.0 | 1.1.1 | 1.1.2 | 1.1.3 | 1.1.4 | 1.1.5 | 1.1.6 | 1.1.7 | 1.1.8 | 1.1.9 )
+		f.toconsole; echo "Sorry, your version of ethOS is too old to update to the latest version.  Please download an updated image from your original email download instructions, or reply to any gpuShack email for new download instructions."; exit 1
+	;;
+	1.2.0 | 1.2.1 | 1.2.2 | 1.2.3 | 1.2.4 | 1.2.5 )
+		TIMEREQUIRED="15"
+		f.do-update "$@"
+	;;
+	1.2.6 )
+		TIMEREQUIRED="5"
+		f.do-update "$@"
+	;;
+	1.2.7 | dev )
+		TIMEREQUIRED="5"
+		f.latest "$@"
+	;;
+esac

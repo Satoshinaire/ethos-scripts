@@ -1,0 +1,26 @@
+#!/bin/bash
+
+`/opt/ethos/bin/bootlog ethos-postlogin`;
+
+/opt/ethos/sbin/check-opencl
+touch ~/.Xauthority
+xauth generate :0 . trusted
+xauth add ${HOST}:0 . $(xxd -l 16 -p /dev/urandom)
+LOCKSCREEN=$(/opt/ethos/sbin/ethos-readconf lockscreen)
+if [ ! -z "$LOCKSCREEN" ]; then
+  if [ "$LOCKSCREEN" = "enabled" ];then
+    sleep 10
+    /opt/ethos/bin/lock &
+  fi
+fi
+if [ -e "/home/ethos/custom.sh" ]; then
+  /home/ethos/custom.sh
+fi
+if [ -f "/home/ethos/.config/teamviewer/client.conf" ]; then
+       teamviewer &
+       sleep 10
+       wmctrl -r "Teamviewer" -b toggle,hidden
+       wmctrl -r "Computers & Contacts" -b toggle,hidden
+fi
+
+

@@ -1,0 +1,6 @@
+#!/usr/bin/sudo /bin/bash
+#
+# Must be sudo to clear out this log.
+#
+
+cat /dev/null > /var/log/ethos-notice.log

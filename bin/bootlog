@@ -1,0 +1,15 @@
+#!/usr/bin/env php
+<?php
+date_default_timezone_set('UTC');
+
+$string = date("D M j G:i:s T Y")." ".microtime()." ".$argv[1];
+
+$temp_file = "/var/run/ethos/bootlogs/bootlog.".$argv[1];
+
+`touch $temp_file`;
+`chmod 644 $temp_file`;
+`chown ethos.ethos $temp_file`;
+
+file_put_contents($temp_file,trim($string)."\n");
+
+?>

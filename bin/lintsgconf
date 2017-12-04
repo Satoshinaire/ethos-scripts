@@ -1,0 +1,21 @@
+#!/bin/bash
+MINER=$(/opt/ethos/sbin/ethos-readconf miner)
+case "$MINER" in 
+	sgminer-gm-xmr )
+		CONFIG="/home/ethos/sgminer-gm-xmr.stub.conf"
+	;;
+	* )
+		CONFIG="/home/ethos/sgminer.stub.conf"
+	;;
+esac
+
+	
+case "$1" in 
+status )
+  /usr/bin/jsonlint "$CONFIG"
+  echo "$?"
+;;
+* )
+  /usr/bin/jsonlint -v "$CONFIG"
+;;
+esac

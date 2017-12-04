@@ -1,0 +1,2 @@
+#!/bin/bash
+echo "\"mine\" is not a valid command, please use \"minestop && disallow\" or \"minestart && allow\""

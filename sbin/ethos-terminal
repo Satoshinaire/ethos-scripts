@@ -1,0 +1,20 @@
+#!/bin/bash
+
+`/opt/ethos/bin/bootlog ethos-terminal`;
+
+export DISPLAY=:0 2>&1>/dev/null
+cd /home/ethos
+export BOOTTERM=1
+urxvt -geometry 85x50-0-0 -icon /home/ethos/Pictures/ethos-icon.xbm &
+ failcount=0		
+  wmctrl -a "urxvt"		  wmctrl -a "urxvt"
+  while [ $? -ne 0 ]; do		
+    if [ "$failcount" -lt "10" ]; then		
+    ((failcount++))		
+    	sleep 1		
+    	wmctrl -a "urxvt"		
+    else		
+    #exit, too many failures		
+    	break		
+    fi		
+  done

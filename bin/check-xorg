@@ -1,0 +1,17 @@
+#!/bin/bash
+if [ $(/opt/ethos/sbin/ethos-readconf driver)  = "amdgpu" ]; then
+	exit 0
+fi
+if [ $(cat /var/run/ethos/check-xorg.file) = "1" ]; then
+	exit 0
+fi
+NODMRUNNING=$(dbus-send --system --print-reply --dest=com.ubuntu.Upstart /com/ubuntu/Upstart/jobs/nodm/_ org.freedesktop.DBus.Properties.GetAll string:'' 2>/dev/null | grep -A 1 "state" | grep -c "running" | xargs 2>/dev/null)
+count="0"
+echo "Waiting for display manager to start."
+until [ "$NODMRUNNING" -ne "0" -o "$count" -ge "90" ];do
+	sleep 2
+	echo -n "."
+	NODMRUNNING=$(dbus-send --system --print-reply --dest=com.ubuntu.Upstart /com/ubuntu/Upstart/jobs/nodm/_ org.freedesktop.DBus.Properties.GetAll string:'' 2> /dev/null | grep -A 1 "state" | grep -c "running" | xargs 2>/dev/null)
+	((count++))
+done
+echo "1" > /var/run/ethos/check-xorg.file

@@ -1,0 +1,15 @@
+#!/usr/bin/env php
+<?php
+
+`/opt/ethos/bin/bootlog ethos-config-daemon`;
+
+@ob_end_clean();
+
+require_once('/opt/ethos/lib/functions.php');
+
+while(true){
+	sleep(600);
+	putconf();
+}
+
+?>

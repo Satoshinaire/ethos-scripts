@@ -1,0 +1,11 @@
+#!/usr/bin/env php
+<?php
+
+$is_amd = trim(`cat /proc/cpuinfo | grep AMD | wc -l`);
+
+if($is_amd > 0){ 
+        `/usr/bin/sensors 2>/dev/null | grep -A3 "k10temp" | grep -Poi -m1 "(?<=\+)(.*)(?=...C\s)" > /var/run/ethos/cputemp.file`;
+} else {
+        `/usr/bin/sensors 2>/dev/null | grep -A3 "coretemp" | grep -Poi -m1 "(?<=\+)(.*)(?=...C\s)" > /var/run/ethos/cputemp.file`;
+}
+?>

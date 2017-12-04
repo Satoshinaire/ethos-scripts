@@ -1,0 +1,4 @@
+#!/bin/bash
+echo '0' > /opt/ethos/etc/allow.file
+echo 'Mining has been disallowed from starting automatically.'
+

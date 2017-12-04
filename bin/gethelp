@@ -1,0 +1,79 @@
+#!/usr/bin/env php
+<?php
+
+$line = "============================================================================";
+$primary_drive = trim(`sudo blkid | grep 'UUID=\"f96c3164-6f44-43b3-be09-d8cfed4934ea\"' | grep -Poi '(/dev/\w+)(?=\d)'`);
+
+$lastgpu = trim(`cat /var/run/ethos/gpucount.file`)-1;
+
+$command[] = "echo '############ rig info'";
+$command[] = "date -u";
+$command[] = "echo -n 'hostname:' && hostname";
+$command[] = "/opt/ethos/bin/stats";
+$command[] = "cat /var/run/ethos/url.file";
+$command[] = "cat /var/run/ethos/status.file";
+$command[] = "/opt/ethos/bin/render-conky";
+
+$command[] = "echo '############ gpu info'";
+$command[] = "cat /var/run/ethos/atitweak_sample.file";
+$command[] = "cat /var/run/ethos/aticonfig_sample.file";
+$command[] = "cat /var/run/ethos/gpulist.file";
+$command[] = 'lspci -v | egrep -i "VGA|3D|Display"';
+
+$command[] = "echo '############ config info'";
+$command[] = "cat /home/ethos/remote.conf";
+$command[] = "cat /home/ethos/local.conf | grep -v '^#'";
+$command[] = "cat /home/ethos/local.conf";
+$command[] = "cat /tmp/minercmd";
+$command[] = 'ls /home/ethos | grep stub | for i in `xargs`; do echo "___________" && echo $i && echo "___________" && echo ""; cat /home/ethos/$i; echo ""; done';
+$command[] = "cat /opt/miners/claymore/config.txt";
+$command[] = "cat /opt/miners/claymore-zcash/config.txt";
+$command[] = "cat /var/run/ethos/sgminer.conf";
+$command[] = "cat /home/ethos/custom.sh | grep -v '^#'";
+
+$command[] = "echo '############ log info'";
+$command[] = "tail -50 /var/run/miner.output";
+for($i = 0; $i <= $lastgpu; $i++){
+	$command[] = "tail -25 /var/run/miner.".$i.".output";
+}
+$command[] = "tail -50 /var/run/ethos/proxy.output";
+$command[] = "top -b -n 1 | head -n 27";
+$command[] = "tail -50 /var/log/dmesg";
+$command[] = "tail -100 /var/log/ethos-overclock.log";
+$command[] = "cat /var/run/ethos/bootlogs/bootlog.* | sort";
+$command[] = "cat /var/run/ethos/miner.dump  | tr ',' '\n'";
+
+$command[] = "echo '############ drive info'";
+$command[] = "sudo smartctl -a -data -s on $primary_drive";
+
+echo "\ngenerating diagnostics report ...\n\n";
+
+$output .= $line."\n";
+$output .= "ethOS Diagnostics Report\n\n";
+$output .= $line."\n\n\n";
+
+foreach($command as $run){
+
+	if(eregi("############",$run)){
+
+		$output .= trim(`$run`)." ##################################\n\n\n";
+
+
+	} else { 
+
+		$outout .= $line."\n\n";
+		$output .= "# ".$run."\n\n";
+		$output .= $line."\n";
+		$output .= trim(`$run`)."\n\n";
+		$output .= $line."\n\n\n\n\n\n";
+	}
+
+}
+
+file_put_contents("/tmp/gethelp.file",$output);
+
+$report = `cat /tmp/gethelp.file | /opt/ethos/bin/pasteit `;
+
+echo "Your gethelp link: $report\n";
+echo "Give the above link to support staff, include a description of the issue in your own words.\n\n";
+

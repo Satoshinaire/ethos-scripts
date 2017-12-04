@@ -1,0 +1,10 @@
+#!/bin/sh
+
+`/opt/ethos/bin/bootlog write-host`;
+
+MYHOSTNAME=$(/sbin/ifconfig | grep -e HW -e eth0 | head -1 | awk '{print $NF}' | sed 's/://g' | tail -c 7)
+echo "$MYHOSTNAME" > /etc/hostname
+/bin/hostname "$MYHOSTNAME"
+cp /opt/ethos/etc/hosts /etc/hosts
+echo "127.0.1.1 $(hostname)" | sudo tee -a /etc/hosts
+echo $(hostname -I | cut -d\  -f1) $(hostname) | sudo tee -a /etc/hosts

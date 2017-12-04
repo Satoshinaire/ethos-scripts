@@ -1,0 +1,7 @@
+[Desktop Entry]
+Comment=
+Terminal=false
+Name=ethOS Stats panel
+Exec=/bin/bash -c "/usr/bin/chromium-browser -a \"http://ETHOSPANEL.ethosdistro.com\""
+Type=Application
+Icon=/usr/share/pixmaps/chromium.xpm

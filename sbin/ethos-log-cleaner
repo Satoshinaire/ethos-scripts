@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016 Dale Chapman, sling00@gmail.com (“Author”).
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack’s owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+
+`/opt/ethos/bin/bootlog ethos-log-cleaner`;
+
+while true; do
+	echo `date +%s` > /opt/ethos/etc/check-ro.file
+	shopt -s globstar; shopt -s dotglob; SIZES=( $(df /var/log | tr -s " " | cut -d" " -f 2,3 | tail -1 ) ); if [ ${SIZES[0]} -eq ${SIZES[1]} ]; then LARGEST=$(du -s /var/log/* | sort -g | tail -1 | xargs | cut -d" " -f 2 ); LFN=$( echo "$LARGEST" | awk -F'/' '{print $NF}' ); tail -1500 $LARGEST > /var/run/$LFN.bak; cat /var/run/$LFN.bak > $LARGEST; fi; FILES=( $(echo "/var/log/**" | grep -v '\.bak')); for i in ${FILES[@]}; do if [ -d "$i" ]; then mkdir -p /var/run$i; fi; if [ -f "$i" ]; then tail -1500 $i > /var/run$i.bak; mv /var/run$i.bak $i; fi;done
+	
+	for i in $(seq 0 16); do
+		if [ -s "/var/run/miner.$i.output" ]; then
+			tail -n 200 /var/run/miner.$i.output > /var/run/miner.$i.output.tmp
+			cat /var/run/miner.$i.output.tmp > /var/run/miner.$i.output
+		fi
+	done
+	reload rsyslog>/dev/null 2>&1
+
+	tail -n 1500 /var/run/miner.output > /var/run/miner.output.tmp
+	cat /var/run/miner.output.tmp > /var/run/miner.output
+
+	tail -n 200 /var/run/proxy.output > /var/run/proxy.output.tmp
+	cat /var/run/proxy.output.tmp > /var/run/proxy.output
+
+	tail -n 3000 /var/run/ethos/miner_hashes.file > /var/run/ethos/miner_hashes.file.tmp
+	cat /var/run/ethos/miner_hashes.file.tmp > /var/run/ethos/miner_hashes.file
+
+	sleep 300
+done

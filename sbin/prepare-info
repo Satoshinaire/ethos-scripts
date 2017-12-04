@@ -1,0 +1,46 @@
+#!/usr/bin/env php
+<?php
+
+`/opt/ethos/bin/bootlog prepare-info`;
+
+require_once('/opt/ethos/lib/minerprocess.php');	
+check_status();
+$hash = trim(`/opt/ethos/sbin/ethos-readconf custompanel`);
+$hash = preg_replace("/[^a-zA-Z0-9]+/", "", $hash);
+$hash = trim(substr($hash,0,12));
+
+if(!$hash){
+        $get_ip = trim(file_get_contents("https://api.ipify.org"));
+        $hash = hash("sha256",$get_ip);
+        $hash = trim(preg_replace("/[^a-zA-Z0-9]+/", "", $hash));
+        $hash = substr($hash,0,12);
+}
+
+$public_hash = substr($hash,0,6);
+
+$url = "http://".$public_hash.".ethosdistro.com";
+
+file_put_contents("/var/run/ethos/public_ip.file",$get_ip);
+file_put_contents("/var/run/ethos/private_hash.file",$hash);
+file_put_contents("/var/run/ethos/panel.file",$public_hash);
+file_put_contents("/var/run/ethos/url.file",$url);
+
+`/usr/sbin/dmidecode -t 2 | grep -Poi "(?<=Product\sName\:\s)(.*)" | xargs > /var/run/ethos/motherboard.file`;
+$cpucount = trim(`cat /proc/cpuinfo | grep -c processor`);
+$cpumodel = trim(`cat /proc/cpuinfo | grep -m1 'model name' | awk -F": " '{print \$2}'`);
+
+file_put_contents("/var/run/ethos/cpuinfo.file","$cpucount" . " x " . "$cpumodel");
+//make nick
+
+$sub = crc32(substr($public_hash,0,3));
+
+$start = 1;
+$end = 4274128841;
+
+$normal = 2000-round(((($sub - $start)/($end - $start))*2000));
+
+$rwords = file("/opt/ethos/lib/english.txt");
+
+file_put_contents("/var/run/ethos/nick.conf",$rwords[$normal]);
+
+?>

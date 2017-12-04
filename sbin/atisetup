@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016 Dale Chapman, sling00@gmail.com (“Author”).
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack’s owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+
+if [ ! -d "/var/run/ethos" ];then
+	mkdir -p /var/run/ethos/bootlogs
+	chown -R ethos.ethos /var/run/ethos
+fi
+echo "starting ethos: finishing boot process" > /var/run/ethos/status.file
+sleep 15
+/opt/ethos/bin/bootlog atisetup
+
+NODRIVER=$(grep -c "nomine" "/proc/cmdline")
+#TODO: Need to move nomine function up here and blacklist all video drivers, amdgpu, nvidia, fglrx
+DRIVER=$(/opt/ethos/sbin/ethos-readconf driver)
+if [ "$NODRIVER" = "1" ];then #nodriver if
+	echo "Booting without fglrx driver.."
+	cat <<-EOT >> /etc/modprobe.d/fglrx-blacklist.conf
+	blacklist fglrx\n
+	blacklist fglrx_updates\n
+	blacklist amdgpu\n
+	blacklist nvidia\n
+	alias amdgpu off\n
+	alias nvidia off\n
+	alias fglrx off\n
+	alias fglrx_updates off\n
+	EOT
+	/etc/modprobe.d/fglrx-blacklist.conf
+	echo "1" > /var/run/ethos/nomine.file
+	/sbin/rmmod fglrx
+	/sbin/rmmod amdgpu
+	/sbin/rmmod nvidia
+	/usr/sbin/grub-reboot 0
+else
+	if [ -f "/etc/modprobe.d/fglrx-blacklist.conf" ];then #blacklist if
+		rm -f /etc/modprobe.d/fglrx-blacklist.conf
+	fi #blacklist fi
+	rm -f /etc/X11/xorg.conf
+fi #nodriver fi
+
+case "$DRIVER" in
+	fglrx )
+		if [ -f /temp/fglrx.configured ];then #fglrx if 1
+			echo "Not Reconfiguring X, Ati Drivers already Configured on system boot.  Delete /tmp/fglrx.configured and restart this service to force reconfiguration"
+		else
+			/usr/bin/timeout 20 /usr/bin/aticonfig --adapter=all --initial -f --nobackup
+			if [ "$?" = "0" ];then
+				#--resolution 1280x1024 --dtop clone −−force−monitor=crt1, crt2, lvds, tv, tmds1, tmds2, tmds2i, nocrt1, nocrt2, nolvds, notv, notmds1, notmds2, notmds2i
+				touch /tmp/fglrx.configured
+				echo "ATI Driver Configuration Successful, Starting Xorg."
+			else
+				echo "2" > /var/run/ethos/nomine.file
+			fi #fglrx fi 2
+		fi #fglrx fi 1
+	;;
+	amdgpu )
+		echo "Using amdgpu-pro driver stack..."
+	;;
+	nvidia )
+		echo "Using NVidia driver stack..."
+		if [ -f /tmp/nvidia.configured ];then
+			echo "Not Reconfiguring X, NVidia Drivers already Configured on system boot.  Delete /tmp/nvidia.configured and restart this service to force reconfiguration"
+		else
+			rm /etc/X11/xorg.conf
+			IGPU=$(lspci |grep "VGA" | grep -v NVIDIA | wc -l )
+			/usr/bin/sudo /usr/bin/nvidia-xconfig --preserve-busid --allow-empty-initial-configuration --cool-bits=31 --probe-all-gpus --no-sli -a
+			if [ "$IGPU" -gt "0" ]; then
+				if [ $(lspci -k | grep "VGA" | grep -ci "intel") -eq "1" ];then
+					IGPUDRIVER="intel"
+				elif [ $(lspci -k | grep "VGA" | grep -ci "aspeed") -eq "1" ];then
+					IGPUDRIVER="ast"
+				else
+					IGPUDRIVER="modesetting"
+				fi
+				PCI=$(lspci | grep VGA | grep -v NVIDIA | cut -d " " -f 1)
+				BUS="BusID          \"PCI:$((16#${PCI:0:2})):$((16#${PCI:4:1})):$((16#${PCI:6:1}))\""
+				LAST=$(cat /etc/X11/xorg.conf | grep "Screen    " | tail -1 | tr -s ' '| cut -d ' ' -f 3)
+				NEWSCREEN=$(( LAST + 1 ))
+				sed -i "/    Screen .*${LAST}/a\    Screen      $NEWSCREEN  \"Screen0\" RightOf \"Screen$NEWSCREEN\"" /etc/X11/xorg.conf
+				sed -i "s/Screen      0  \"Screen0\"/Screen      0  \"Screen$NEWSCREEN\"/g" /etc/X11/xorg.conf
+				cat << EOF | sudo tee -a /etc/X11/xorg.conf > /dev/null
+Section "Monitor"
+		Identifier     "Monitor$NEWSCREEN"
+		VendorName     "Unknown"
+		ModelName      "Unknown"
+EndSection
+
+Section "Device"
+		Identifier     "Device$NEWSCREEN"
+		Driver         "$IGPUDRIVER"
+		VendorName     "iGPU"
+		BoardName      "iGPU"
+		$BUS
+EndSection
+
+Section "Screen"
+		Identifier     "Screen$NEWSCREEN"
+		Device         "Device$NEWSCREEN"
+		Monitor        "Monitor$NEWSCREEN"
+		DefaultDepth    24
+		SubSection     "Display"
+		Depth       24
+		EndSubSection
+EndSection
+EOF
+			fi
+			if [ "$?" = "0" ];then
+				touch /tmp/nvidia.configured
+				echo "NVidia Driver Configuration Successful, Starting Xorg." >> /var/run/ethos/log.file
+			else
+				echo "2" > /var/run/ethos/nomine.file
+			fi
+		fi
+	;;
+esac
+rm -f /home/ethos/.Xauthority

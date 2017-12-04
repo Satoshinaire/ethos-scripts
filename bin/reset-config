@@ -1,0 +1,11 @@
+#!/bin/bash
+echo "Restoring default configuration..."
+echo "http://ethosdistro.com/pool.txt" > /home/ethos/remote.conf
+echo "#comment out or remove the top line to enable single-rig mode" >> /home/ethos/remote.conf
+sudo cp /opt/ethos/etc/sgminer.stub.conf /home/ethos/sgminer.stub.conf
+sudo cp /opt/ethos/etc/sgminer-gm-xmr.stub.conf /home/ethos/sgminer-gm-xmr.stub.conf
+sudo cp /opt/ethos/etc/claymore.stub.conf /home/ethos/claymore.stub.conf
+sudo cp /opt/ethos/etc/claymore-zcash.stub.conf /home/ethos/claymore-zcash.stub.conf
+sudo chown ethos.ethos /home/ethos/{remote.conf,local.conf,sgminer.stub.conf,sgminer-gm-xmr.stub.conf,claymore.stub.conf,claymore-zcash.stub.conf}
+sudo putconf
+

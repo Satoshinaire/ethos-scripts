@@ -1,0 +1,7 @@
+#!/usr/bin/env php
+<?php
+require_once("/opt/ethos/lib/functions.php"); 
+`/opt/ethos/bin/bootlog putconf`;
+putconf("1");
+?>
+

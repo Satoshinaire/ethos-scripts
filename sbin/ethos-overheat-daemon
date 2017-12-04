@@ -1,0 +1,25 @@
+#!/usr/bin/env php
+<?php
+
+`/opt/ethos/bin/bootlog ethos-overheat-daemon`;
+
+@ob_end_clean();
+
+require_once('/opt/ethos/lib/functions.php');
+
+while(true){
+
+        $uptime = trim(`cut -d " " -f1 /proc/uptime | cut -d "." -f 1`);
+
+        $conky_instance = intval(trim(`pgrep "conky" | wc -l`));
+
+        if ($conky_instance == 0 && $uptime > 120) {
+                `/opt/ethos/sbin/start-conky`;
+        }
+
+	prevent_overheat($max_temp);
+
+	usleep(2000000);
+}
+
+?>

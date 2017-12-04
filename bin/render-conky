@@ -1,0 +1,57 @@
+#!/usr/bin/env php
+<?php
+
+$version = trim(`cat /opt/ethos/etc/version`);
+$motherboard = trim(`cat /var/run/ethos/motherboard.file | cut -d":" -f2`);
+$hostname = trim(`cat /etc/hostname`);
+$uptime = trim(`/opt/ethos/bin/human_uptime`);
+$ip = trim(`/sbin/ifconfig | grep 'Bcast' | head -1 |  cut -d":" -f2 | cut -d" " -f1`);
+$panel = trim(`cat /var/run/ethos/url.file`);
+$temps = explode(" ",trim(`/opt/ethos/sbin/ethos-readdata temps`));
+$hashes = explode(" ",trim(`tail -1 /var/run/ethos/miner_hashes.file`));
+$fans = explode(" ",trim(`/opt/ethos/sbin/ethos-readdata fanrpm | xargs`));
+$status = trim(`cat /var/run/ethos/status.file`);
+$gpus = explode("\n",trim(file_get_contents("/var/run/ethos/gpulist.file")));
+$message = trim(`cat /opt/ethos/etc/message`);
+$rack_loc = trim(`/opt/ethos/sbin/ethos-readconf loc`);
+
+$ram = trim(`free -h | grep Mem | awk '{print "ram amount:     "\$2"   used: "\$3"   free: "\$4}'`);
+$cpu = sprintf("%.1f",(trim(`mpstat | grep -v CPU | xargs | awk '{print 100-\$NF}'`)));
+
+$cputemp = sprintf("%.0f",(trim(`cat /var/run/ethos/cputemp.file`)));
+$load = trim(`uptime | grep load | awk '{print \$(NF-2)" "\$(NF-1)" "\$NF}' | sed 's/,//g'`);
+
+$gpu_count = count($gpus);
+
+$render  = "ethOS $version on $motherboard with $gpu_count GPUs\n";
+
+if(!$rack_loc){
+        $render .= "rig $hostname up $uptime\n";
+} else { 
+        $render .= "rig $hostname ($rack_loc) up $uptime\n";
+}
+
+$render .= "$ip at $panel\n\n";
+$render .= "$ram\n";
+$render .= "cpu usage / temp / load: " . $cpu . "% / " . $cputemp . "C / " . $load . "\n\n";
+
+
+for($i = 0; $i < $gpu_count; $i++){
+
+        if(!trim($hashes[$i])){ $hashes[$i] = "00.00"; }
+        if(!trim($temps[$i])){ $temps[$i] = "00.00"; }
+        $fans[$i] = sprintf('%.1f', $fans[$i]/1000);
+        $fans[$i] = sprintf("%-4s", $fans[$i]);
+        $hashes[$i] = sprintf("%-6s", $hashes[$i]);
+        $render .= round($temps[$i])."°C  Fan: ".$fans[$i]."   Hash: ".$hashes[$i]."   ".$gpus[$i]."\n";
+}
+
+$render .= "\n$status\n\n";
+
+$render .= "$message\n\n";
+
+$render .= "run 'helpme' to get started, root/ethos password is 'live'\ntoggle fullscreen terminal with ctrl+alt+left/right arrow\n";
+
+echo $render;
+
+?>

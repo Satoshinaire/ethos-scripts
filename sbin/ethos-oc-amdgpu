@@ -1,0 +1,358 @@
+#!/bin/bash
+
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016-2017 Dale Chapman, sling00@gmail.com ("Author").
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack's owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+#
+# Version History
+#
+# v1.2 ethOS RELEASE
+# v1.1 NVIDIA SUPPORT ADDED
+# v1.0 AMD ONLY (initial release)
+sudo touch /var/log/ethos-overclock.log
+sudo chown ethos.ethos /var/log/ethos-overclock.log
+function DATE() {
+	echo "$(date -u)"
+}
+
+ORIGINALTTY=$(tty)
+
+if [ -z "$1" ]; then		  
+	echo "$(DATE) - ethOS-overclock started.... WARNING: Only applying fan settings, amdgpu clock changes require a reboot to take effect!"		  echo "$(DATE) - ethOS-overclock started" 
+	echo "$(DATE) - ethOS-overclock started.... WARNING: Only applying fan settings, amdgpu clock changes require a reboot to take effect!" > /var/log/ethos-overclock.log		  echo "$(DATE) - ethOS-overclock started" > /var/log/ethos-overclock.log
+else		
+	echo "$(DATE) - ethOS-overclock started" 		
+	echo "$(DATE) - ethOS-overclock started" > /var/log/ethos-overclock.log		
+fi		
+
+exec 1>>/var/log/ethos-overclock.log
+exec 2>>/var/log/ethos-overclock.log
+SERIES=$(/opt/ethos/sbin/ethos-readdata bios)
+SERIES=($SERIES)
+GPUCOUNT=$(cat /var/run/ethos/gpucount.file)
+for ((I=0;I<GPUCOUNT;I++)); do
+	GPUS[$I]=$I
+done
+
+CONFFILE="/home/ethos/local.conf"
+MYNAME=$(/sbin/ifconfig | grep -e HW -e eth0 | head -1 | awk '{print $NF}' | sed 's/://g' | tail -c 7)
+MYCORES=( $(grep -m 1 -Poi "(?<=^cor.$HOSTNAME)\s+(.*)" "$CONFFILE" |xargs) )
+MYMEM=( $(grep -m 1 -Poi "(?<=^mem.$HOSTNAME)\s+(.*)" "$CONFFILE" |xargs) )
+MYFAN=( $(grep -m 1 -Poi "(?<=^fan.$HOSTNAME)\s+(.*)" "$CONFFILE" |xargs) )
+MYPOWERTUNE=( $(grep -m 1 -Poi "(?<=^pwr.$HOSTNAME)\s+(.*)" "$CONFFILE" |xargs) )
+MYVOLTAGE=( $(grep -m 1 -Poi "(?<=^vlt.$HOSTNAME)\s+(.*)" "$CONFFILE" |xargs) )
+GLOBALFAN=$(grep -m 1 -Poi "(?<=^globalfan)\s+(.*)" "$CONFFILE" |xargs)
+GLOBALCORE=$(grep -m 1 -Poi "(?<=^globalcore)\s+(.*)" "$CONFFILE" |xargs)
+GLOBALMEM=$(grep -m 1 -Poi "(?<=^globalmem)\s+(.*)" "$CONFFILE" |xargs)
+GLOBALPTUNE=$(grep -m 1 -Poi "(?<=^globalpowertune)\s+(.*)" "$CONFFILE" |xargs)
+OVERRIDE=$(grep -m 1 -Poi "(?<=^override)\s+(.*)" "$CONFFILE" |xargs)
+
+if [ "$1" == "boot" ]; then
+	echo "Allowing 20 seconds for System startup to complete."
+	sleep 20
+fi
+
+DCF=$(cat /var/run/ethos/defaultcore.file)
+if [ -z "$DCF" ]; then
+	for I in "${!GPUS[@]}"; do
+		DATA=$(tail -1 /sys/class/drm/card$I/device/pp_dpm_sclk | grep -Poi "(?<=\d\: )(\d+)")
+		CORE="$CORE $DATA"
+		DATA1=$(tail -1 /sys/class/drm/card$I/device/pp_dpm_mclk | grep -Poi "(?<=\d\: )(\d+)")
+		MEM="$MEM $DATA1"
+	done
+	echo "$CORE" > /var/run/ethos/defaultcore.file
+	echo "$MEM" > /var/run/ethos/defaultmem.file
+fi
+
+#Set the default clocks back before we begin incase we are clearing thermals... Not currently used.
+
+
+if [ "$1" = "clear" ]; then
+	CORES=$(cat /var/run/ethos/defaultcore.file)
+	MEM=$(cat /var/run/ethosdefaultmem.file)
+	RUNNINGPTUNE=$(/opt/ethos/sbin/ethos-readdata powertune)
+	RUNNINGCORE=$(/opt/ethos/sbin/ethos-readdata core)
+	RUNNINGMEM=$(/opt/ethos/sbin/ethos-readdata mem)
+	CORES=($CORES)
+	MEM=($MEM)
+	RUNNINGPTUNE=($RUNNINGPTUNE)
+	RUNNINGCORE=($RUNNINGCORE)
+	RUNNINGMEM=($RUNNINGMEM)
+
+	for I in "${!GPUS[@]}";do
+		if [ "${RUNNINGCORE[$I]}" != "${CORE[$I]}" ] && [ "${RUNNINGMEM[$I]}" != "${MEM[$I]}" ];then
+			/opt/ethos/bin/ohgodatool -i "$I" --core-state "${RUNNINGPTUNE[$I]}" --core-clock "${CORES[$I]}" --mem-state 1 --mem-clock "${MEM[$I]}"
+		elif [ "${RUNNINGCORE[$I]}" != "${CORE[$I]}" ];then
+			/opt/ethos/bin/ohgodatool -i "$I" --core-state "${RUNNINGPTUNE[$I]}" --core-clock "${CORES[$I]}"
+		elif [ "${RUNNINGMEM[$I]}" != "${MEM[$I]}" ];then
+			/opt/ethos/bin/ohgodatool -i "$I" --mem-state -1 --mem-clock "${MEM[$I]}"
+		fi
+	done
+fi
+
+if [ ! -z "$OVERRIDE" ] && [ "$OVERRIDE" = "yes" ]; then
+	echo "Override enabled, All overclocking disabled."
+	unset "${MYCORES[*]}"
+	unset "${MYMEM[*]}"
+	unset "${MYFAN[*]}"
+	unset "${MYPOWERTUNE[*]}"
+	unset "${MYVOLTAGE[*]}"
+	unset "$GLOBALCORE"
+	unset "$GLOBALMEM"
+	unset "$GLOBALPTUNE"
+fi
+
+##Setup the series data
+for I in "${!GPUS[@]}"; do
+	SERIESCORE[$I]=$(grep -m 1 -Poi "(?<=^cor.${SERIES[$I]})\s+(.*)" "$CONFFILE" |xargs)
+	SERIESMEM[$I]=$(grep -m 1 -Poi "(?<=^mem.${SERIES[$I]})\s+(.*)" "$CONFFILE" |xargs)
+	SERIESFAN[$I]=$(grep -m 1 -Poi "(?<=^fan.${SERIES[$I]})\s+(.*)" "$CONFFILE" |xargs)
+	SERIESPOWERTUNE[$I]=$(grep -m 1 -Poi "(?<=^pwr.${SERIES[$I]})\s+(.*)" "$CONFFILE" |xargs)
+	SERIESVOLT[$I]=$(grep -m 1 -Poi "(?<=^vlt.${SERIES[$I]})\s+(.*)" "$CONFFILE" |xargs)
+	#echo "GPU $I: BIOS: ${SERIES[$I]} CORE: ${SERIESCORE[$I]} MEM: ${SERIESMEM[$I]} FAN: ${SERIESFAN[$I]} POWERTUNE: ${SERIESPOWERTUNE[$I]} VOLTAGE: ${SERIESVOLT[$I]}"
+done
+
+PERMSSET=$(cat /var/run/ethos/amdgpu-perms-set.file)
+if [ -z "$PERMSSET" ];then
+	chmod g+rx /sys/kernel/debug
+	CARDS=$(echo /sys/class/drm/* | grep -Poi "(?<=card)(\d+\s)" | xargs)
+	#echo "Cards: $CARDS"
+	CARDS=($CARDS)
+	FILES=(power_dpm_force_performance_level pp_dpm_mclk pp_dpm_sclk pp_mclk_od pp_sclk_od pp_table pp_voltage )
+	for i in "${!CARDS[@]}";do
+		#echo "DEBUG: Setting up GPU $i files "
+		HWMONDIR=$(echo /sys/class/drm/card"$i"/device/hwmon/* | grep -Poi "(hwmon\d+)")
+		HWMONFILES=("$HWMONDIR"/pwm1 "$HWMONDIR"/pwm1_enable "$HWMONDIR"/temp1_input )
+		for j in "${!FILES[@]}";do
+			#echo "DEBUG: chmod g+w /sys/class/drm/card$i/device/${FILES[$j]}"
+			if [ -e "/sys/class/drm/card$i/device/{FILES[$j]}" ];then
+				chmod g+w /sys/class/drm/card"$i"/device/${FILES[$j]}
+			fi
+		done
+		for k in "${!HWMONFILES[@]}";do
+			#echo "DEBUG: chmod g+w /sys/class/drm/"$i"/device/hwmon/"${HWMONFILES[$k]}""
+			if [ -e "/sys/class/drm/card"$i"/device/hwmon/${HWMONFILES[$k]}" ]; then
+				chmod g+w /sys/class/drm/card"$i"/device/hwmon/${HWMONFILES[$k]}
+			fi
+		done
+	done
+	echo "1" > /var/run/ethos/amdgpu-perms-set.file
+fi
+
+## Fan
+function f.setfan(){
+	for I in "${!GPUS[@]}"; do
+		HWMONDIR=$(echo /sys/class/drm/card$I/device/hwmon/* | grep -Poi "(?<=hwmon)(\d+)") 
+		if [ ! -z "${SETFAN[$I]}" ];then
+			FAN=$(/bin/echo "${SETFAN[$I]} * 2.55" | bc -l | awk '{printf "%.0f", $1}')
+			echo 1 > /sys/class/drm/card$I/device/hwmon/hwmon"$HWMONDIR"/pwm1_enable
+			if [ "${SETFAN[$I]}" -le "100" ] && [ "${SETFAN[$I]}" -ge "0" ];then
+				echo "Applying ${FANTYPE[$I]} Fan settings to GPU$I Value: ${SETFAN[$I]}"
+				echo "$FAN" > /sys/class/drm/card$I/device/hwmon/hwmon"$HWMONDIR"/pwm1
+			else
+				echo "${FANTYPE[$I]} setting of ${SETFAN[$I]} is out of range, valid values are 0-100, setting to 100%"
+				FANTYPE[$I]="INVALID"
+				SETFAN[$I]="100"  
+				echo "255" > /sys/class/drm/card$I/device/hwmon/hwmon"$HWMONDIR"/pwm1
+			fi
+		else 
+			FANTYPE[$I]="Default"
+			echo "No fan settings found for this rig $MYNAME, and no Series/Global fan value defined. Not changing fan settings for GPU$I."
+		fi
+	done
+}
+
+##Voltage
+for I in "${!GPUS[@]}"; do
+	if [ ! -z "${MYVOLTAGE[$I]}" ]; then
+		VTYPE[$I]="Rig Specfic"
+		SETVOLT[$I]="${MYVOLTAGE[$I]}"
+	elif [ -z "${MYVOLTAGE[$I]}" ] && [ ! -z "${SERIESVOLT[$I]}" ]; then
+		MTYPE[$I]="Series Based"
+		SETVOLT[$I]="${SERIESVOLT[$I]}"
+	else
+		VTYPE[$I]="Default"
+		SETVOLT[$I]=""
+	fi
+	if [ ! -z "${SETVOLT[$I]}" ]; then
+		if grep -Pq "(\.\d+)" <<< ${SETVOLT[$I]}; then
+			SETVOLT[$I]=$(echo "scale=0;${SETVOLT[$I]} * 1000/1" | bc -l)
+		fi
+		if [ "${SETVOLT[$I]}" -le "1150" ] && [ "${SETVOLT[$I]}" -ge "650" ]; then
+			echo "WARNING: Setting voltage is EXPERIMENTAL, and UNSUPPORTED! Proceed with caution."
+			echo "ATTEMPTING to Apply ${VTYPE[$I]} Voltage setting to GPU$I Value: ${SETVOLT[$I]}"
+			echo "${SETVOLT[$I]}" > /sys/class/drm/card$I/device/pp_voltage
+		else
+			echo "${VTYPE[$I]} Voltage setting ${SETVOLT[$I]} out of range for gpu $I, Not adjusting core voltage"
+			VTYPE[$I]="INVALID"
+			SETVOLT[$I]="0"
+		fi
+	else
+		VTYPE[$I]="Default"
+		SETVOLT[$I]="0"
+	fi
+done
+
+##Fan
+for I in "${!GPUS[@]}"; do
+	if [ ! -z "${MYFAN[$I]}" ];then
+		FANTYPE[$I]="Rig Specific"
+		SETFAN[$I]="${MYFAN[$I]}"
+	elif [ -z "${MYFAN[$I]}" ] && [ ! -z "${SERIESFAN[$I]}" ];then
+		FANTYPE[$I]="Series based"
+		SETFAN[$I]="${SERIESFAN[$I]}" 
+	elif [ -z "${MYFAN[$I]}" ] && [ -z "${SERIESFAN[$I]}" ] && [ ! -z "$GLOBALFAN" ];then
+		FANTYPE[$I]="Global"
+		SETFAN[$I]="$GLOBALFAN"  
+	fi
+done
+f.setfan
+
+#Powertune / DPM State
+
+function f.setpowertune(){
+	for I in "${!GPUS[@]}"; do
+		echo "manual" > /sys/class/drm/card$I/device/power_dpm_force_performance_level
+		if [ ! -z "${SETPTUNE[$I]}" ];then
+			if [ "${SETPTUNE[$I]}" -le "7" ] && [ "${SETPTUNE[$I]}" -ge "0" ]; then
+				echo "Applying ${PTYPE[$I]} Powertune (DPM State) settings to GPU$I Value: ${SETPTUNE[$I]}"
+				echo "${SETPTUNE[$I]}" > /sys/class/drm/card$I/device/pp_dpm_sclk
+			else
+				echo "${PTYPE[$I]} Powertune setting ${SETPTUNE[$I]} out of range for GPU$I, amdgpu accepts 0-7 for Powertune/DPM State adjustment, applying default value of 5"
+				PTYPE[$I]="INVALID"
+				SETPTUNE[$I]="5"
+				echo "5" > /sys/class/drm/card$I/device/pp_dpm_sclk
+			fi
+		else 
+			PTYPE[$I]="Default"
+			SETPTUNE[$I]="5"
+			echo "No Powertune/DPM State settings found for this rig $MYNAME, and no global Powertune/DPM State value defined. Setting default value of 5 for GPU$I."
+			echo "5" > /sys/class/drm/card$I/device/pp_dpm_sclk
+		fi
+	done
+}
+
+for I in "${!GPUS[@]}"; do
+if [ ! -z "${MYPOWERTUNE[$I]}" ];then
+	PTYPE[$I]="Rig Specific"
+	SETPTUNE[$I]="${MYPOWERTUNE[$I]}"
+elif [ -z "${MYPOWERTUNE[$I]}" ] && [ ! -z "${SERIESPOWERTUNE[$I]}" ];then
+	PTYPE[$I]="Series based"
+	SETPTUNE[$I]="${SERIESPOWERTUNE[$I]}"
+elif [ -z "${MYPOWERTUNE[$I]}" ] && [ -z "${SERIESPOWERTUNE[$I]}" ] && [ ! -z "$GLOBALPTUNE" ];then
+	PTYPE[$I]="Global"
+	SETPTUNE[$I]="$GLOBALPTUNE"
+else 
+	PTYPE[$I]="Default"
+	SETPTUNE[$I]="5"
+fi
+done
+
+if [ "$1" = "boot" ]; then
+f.setpowertune
+for I in "${!GPUS[@]}"; do
+
+##Core
+if [ ! -z "${MYCORES[$I]}" ];then
+		CTYPE[$I]="Rig Specific"
+		SETCORE[$I]="${MYCORES[$I]}"
+elif [ -z "${MYCORES[$I]}" ] && [ ! -z "${SERIESCORE[$I]}" ];then
+		CTYPE[$I]="Series based"
+		SETCORE[$I]="${SERIESCORE[$I]}"
+elif [ -z "${MYCORES[$I]}" ] && [ -z "${SERIESCORE[$I]}" ] && [ ! -z "$GLOBALCORE" ];then
+		CTYPE[$I]="Global"
+		SETCORE[$I]="$GLOBALCORE"
+else 
+		CTYPE[$I]="Default"
+		SETCORE[$I]=""
+fi
+if [ ! -z "${SETCORE[$I]}" ];then
+	if [ "${SETCORE[$I]}" -le "2000" ] && [ "${SETCORE[$I]}" -ge "300" ]; then
+		echo "Applying ${CTYPE[$I]} Core clock settings to GPU$I Value: ${SETCORE[$I]}"	
+		/opt/ethos/bin/ohgodatool -i "$I" --core-state "${SETPTUNE[$I]}" --core-clock "${SETCORE[$I]}"
+	else
+		echo "${CTYPE[$I]} Core setting ${SETCORE[$I]} out of range for GPU$I"
+		CTYPE[$I]="INVALID"
+		SETCORE[$I]=""
+	fi
+else
+	CTYPE[$I]="Default"
+	SETCORE[$I]=""
+	echo "No Core clock settings found for this rig $MYNAME, and no global value defined. Not adjusting core clock for GPU$I."
+fi
+
+##Memory
+if [ ! -z "${MYMEM[$I]}" ]; then
+	MTYPE[$I]="Rig Specfic"
+	SETMEM[$I]="${MYMEM[$I]}"
+elif [ -z "${MYMEM[$I]}" ] && [ ! -z "${SERIESMEM[$I]}" ]; then
+	MTYPE[$I]="Series Based"
+	SETMEM[$I]="${SERIESMEM[$I]}"
+elif [ -z "${MYMEM[$I]}" ] && [ -z "${SERIESMEM[$I]}" ] && [ ! -z "$GLOBALMEM" ]; then
+	MTYPE[$I]="Global"
+	SETMEM[$I]="$GLOBALMEM"
+else
+	MTYPE[$I]="Default"
+	SETMEM[$I]=""
+fi
+if [ ! -z "${SETMEM[$I]}" ]; then
+	if [ "${SETMEM[$I]}" -le "3500" ] && [ "${SETMEM[$I]}" -ge "300" ]; then
+		echo "Applying ${MTYPE[$I]} Memory clock settings to GPU$I Value: ${SETMEM[$I]}"
+		/opt/ethos/bin/ohgodatool -i "$I" --mem-state -1 --mem-clock "${SETMEM[$I]}"
+	else
+		echo "${MTYPE[$I]} Memory setting ${SETMEM[$I]} out of range for gpu $I"
+		MTYPE[$I]="INVALID"
+		SETMEM[$I]=""
+	fi
+else
+	MTYPE[$I]="Default"
+	SETMEM[$I]=""
+	echo "No Memory clock settings found for this rig $MYNAME, and no global value defined. Not adjusting memory clock for GPU$I."
+fi
+
+done
+fi
+
+## Set fan/powertune again after adjusting stuff with wolfs tool, we do this once early and once here so that no way miner is running with unset dpm state
+if [ "$1" = "boot" ]; then
+	f.setpowertune
+fi
+f.setfan
+
+echo "------------------------------------ Ethos Overclock Summary ------------------------------------"
+for I in "${GPUS[@]}";do
+if [ -z "${SETFAN[$I]}" ];then
+	SETFAN[$I]="bios"
+fi
+if [ -z "${SETVOLT[$I]}" ];then
+	SETVOLT[$I]="Auto"
+fi
+DATA[$I]="|-GPU ${GPUS[$I]}|;${CTYPE[$I]} Core:;${SETCORE[$I]};${MTYPE[$I]} Memory:;${SETMEM[$I]};${PTYPE[$I]} Powertune:;${SETPTUNE[$I]};${FANTYPE[$I]} Fan:;${SETFAN[$I]};${VTYPE[$I]} Voltage:;${SETVOLT[$I]};"
+done
+printf "%s\n" "${DATA[@]}" | column -t -s ";"
+echo "|________________________________________________________________________________________________"
+
+if [ ! -z "$ORIGINALTTY" ] && [ "$ORIGINALTTY" != "not a tty" ];then
+	exec 1>"$ORIGINALTTY"
+	exec 2>"$ORIGINALTTY"
+	echo "$(DATE) - ethOS-overclock finished"
+fi
+
+echo "$(DATE) - ethOS-overclock finished" >> /var/log/ethos-overclock.log
+

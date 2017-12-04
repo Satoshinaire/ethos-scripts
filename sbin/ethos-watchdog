@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016 Dale Chapman, sling00@gmail.com (“Author”).
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack’s owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+
+`/opt/ethos/bin/bootlog ethos-watchdog`;
+
+COUNT="0"
+
+function f.restart() {
+  /usr/sbin/service ethos-overheat-daemon restart
+}
+
+while true; do
+MINER=$(/opt/ethos/sbin/ethos-readconf miner)
+PID=$(pgrep -f -x "/usr/bin/php /opt/ethos/sbin/ethos-overheat-daemon")
+MINERPID=$(/opt/ethos/sbin/ethos-readconf pid)
+PROXYPID=$(pgrep -f "python /opt/eth-proxy/eth-proxy.py")
+
+if [ ! -z "$MINERPID" ] && [ "$PID" == "" ] && [ "$COUNT" -ge '5' ] && [ "$COUNT" -lt "10" ] ; then
+ #echo "Process has been dead for a while, going to restart."
+ f.restart
+ COUNT=$((COUNT+1))
+elif [ ! -z "$MINERPID" ] && [ "$PID" == "" ] && [ "$COUNT" -ge "10" ]; then
+ kill -9 $MINERPID
+ if [ ! -z "$PROXYPID" ]; then
+ 	ps uax| grep "python /opt/eth-proxy/eth-proxy.py" | grep -v grep | awk '{print $2}' | xargs kill -9
+ fi
+ echo "1" > /var/run/ethos/nowatchdog.file
+ COUNT="0"
+elif [ ! -z "$MINERPID" ] && [ "$PID" == "" ]; then
+ #echo "Process is dead, checking again in 3 seconds."
+ COUNT=$((COUNT+1))
+elif [ -z "$MINERPID" ]; then
+ #echo "Miner dead, not checking status."
+ COUNT="0"
+else 
+ #echo "Process running, PID is $PID"
+ COUNT="0"
+fi
+sleep 3
+done
+

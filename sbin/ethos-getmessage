@@ -1,0 +1,7 @@
+#!/usr/bin/env php
+<?php
+
+$message_loc = "http://ethosdistro.com/message";
+file_put_contents("/opt/ethos/etc/message", trim(file_get_contents($message_loc)));
+
+?>

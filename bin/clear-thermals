@@ -1,0 +1,18 @@
+#!/usr/bin/env php
+<?php
+
+$last_gpu = file_get_contents("/var/run/ethos/gpucount.file")-1;
+
+for($i = 0; $i <= $last_gpu; $i++){
+	file_put_contents("/var/run/ethos/throttled.gpu".$i,"");
+}
+
+file_put_contents("/var/run/ethos/overheat.file","");
+file_put_contents("/var/run/ethos/throttled.file","");
+file_put_contents("/opt/ethos/etc/autorebooted.file","0");
+
+`sudo /opt/ethos/sbin/ethos-overclock`;
+
+echo "Cleared all overheats and throttles and re-applied overclocks, set autoreboot counter back to 0.\n";
+
+?>

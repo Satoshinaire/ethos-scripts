@@ -1,0 +1,31 @@
+#!/usr/bin/env php
+<?php
+
+function get_http_response_code($url)
+{
+	$headers = get_headers($url);
+	return substr($headers[0], 9, 3);
+}
+
+$servers = array("update.ethosdistro.com","update2.ethosdistro.com");
+
+ini_set('default_socket_timeout', 5);
+
+foreach($servers as $server){
+
+	$ip = gethostbyname($server);
+	$header = @get_http_response_code("http://".$ip."/status/");
+	$status = trim(@file_get_contents("http://".$ip."/status/"));
+
+	if($header == "200" && $status == "online"){
+		$valid_ips[] = $ip;
+	}
+}
+
+shuffle($valid_ips);
+
+$valid_ip = $valid_ips[0];
+$update_version = trim(file_get_contents("http://".$valid_ip."/ethos-updates/version/version"));
+echo "$valid_ip $update_version\n";
+
+?>

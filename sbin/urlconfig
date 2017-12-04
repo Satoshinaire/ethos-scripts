@@ -1,0 +1,26 @@
+#!/bin/bash
+
+`/opt/ethos/bin/bootlog urlconfig`;
+
+panelid=$(cat /var/run/ethos/panel.file)
+rword=$(cat /var/run/ethos/nick.conf)
+
+if [ ! -f /home/ethos/.irssi/persistent ]; then
+  cp /home/ethos/.irssi/base.config /home/ethos/.irssi/nickchange.conf
+  eval "sed -i.bak -e s/ETHOSNICK/$rword-$panelid/g /home/ethos/.irssi/nickchange.conf"
+  mv /home/ethos/.irssi/nickchange.conf /home/ethos/.irssi/config
+else
+  echo "Not auto setting irssi nickname, persistent file present."
+fi
+if [ ! -f /home/ethos/.config/hexchat/persistent ]; then
+  cp /home/ethos/.config/hexchat/base.conf /home/ethos/.config/hexchat/nickchange.conf
+  eval "sed -i.bak -e s/ETHOSNICK/$rword-$panelid/g /home/ethos/.config/hexchat/nickchange.conf"
+  mv /home/ethos/.config/hexchat/nickchange.conf /home/ethos/.config/hexchat/hexchat.conf
+else
+  echo "Not auto setting hexchat nickname, persistent file present."
+fi
+
+  cp /opt/ethos/etc/browser.default /opt/ethos/bin/browser
+  eval "sed -i.bak -e s/ETHOSPANEL/$panelid/g /opt/ethos/bin/browser"
+  cp /opt/ethos/etc/statspanel.desktop.default /home/ethos/.local/share/applications/statspanel.desktop
+  eval "sed -i.bak -e s/ETHOSPANEL/$panelid/g /home/ethos/.local/share/applications/statspanel.desktop"

@@ -1,0 +1,15 @@
+#!/usr/bin/env php
+<?php
+
+`/opt/ethos/bin/bootlog ethos-proxy-daemon`;
+
+@ob_end_clean();
+
+require_once('/opt/ethos/lib/functions.php');
+
+while(true){
+	check_proxy();
+        sleep(60);
+}
+
+?>

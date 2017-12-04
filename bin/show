@@ -1,0 +1,58 @@
+#!/bin/bash
+
+MINER=$(/opt/ethos/sbin/ethos-readconf miner)
+
+function show.sgminer() {
+
+	if [ "$EUID" -eq "0" ]; then
+		su - ethos -c "screen -wipe"
+ 		screen -r ethos/
+	else
+		screen -wipe
+		screen -r "$SCREEN"
+	fi
+}
+case $1 in
+	miner )
+	case "$MINER" in 
+		cgminer-skein )
+			show.sgminer
+			SCREEN="cgminer-skein"
+		;;
+		*"sgminer"* )
+			show.sgminer
+			SCREEN="sgminer"
+		;;
+		* )
+		if [ -z "$2" ]; then
+			echo "tailing /var/run/miner.output (use ctrl+c to exit)"
+	   		sudo tail -20f /var/run/miner.output
+	  	else
+	  		echo "tailing /var/run/miner.$2.output (use ctrl+c to exit)"
+	    		sudo tail -20f /var/run/miner.$2.output
+	  	fi
+		;;
+	esac
+	;;
+	proxy )
+	echo "tailing /var/run/ethos/proxy.output (use ctrl+c to exit)"
+	sudo tail -20f /var/run/ethos/proxy.output
+	;;
+	ethos-overclock )
+	echo "tailing /var/log/ethos-overclock.log (use ctrl+c to exit)"
+        sudo tail -20f /var/log/ethos-overclock.log
+        ;;
+	stats )
+	exec php /opt/ethos/lib/ethos-stats-dump.php
+	;;
+	* )
+        echo "Available commands (example: show miner, show proxy, etc):"
+        echo ""
+        echo "miner:                    /var/run/miner.output (shows combined miner output)"
+	echo "miner x:                  where x is gpu number; ex: show miner 1 (not for sgminer)"
+        echo "proxy:                    /var/run/ethos/proxy.output"
+        echo "ethos-overclock:          /var/log/ethos-overclock.log"
+        echo "stats:                    (show stats that get posted to api server)"
+        echo ""
+	;;
+esac

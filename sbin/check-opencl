@@ -1,0 +1,69 @@
+#!/bin/bash
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016-2017 Dale Chapman, sling00@gmail.com (“Author”).
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack’s owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+
+/opt/ethos/bin/bootlog check-opencl
+
+DRIVER=$(/opt/ethos/sbin/ethos-readconf driver)
+GPUCOUNT=$(cat /var/run/ethos/gpucount.file)
+export DISPLAY=:0 >/dev/null 2>&1
+NOMINE=$(cat /var/run/ethos/nomine.file)
+/opt/ethos/bin/check-xorg
+function f.exit() {
+	if [ ! -z "$ERR" ];then
+		echo "$ERR" | wall 
+		sleep 10
+		echo "$ERR" | wall
+	fi
+	exit 0
+}
+
+if [ "$DRIVER" = "none" ]; then
+	ERR="NO MINING GPUS DETECTED - Check risers and power cables"
+	echo "1" > /var/run/ethos/adl_error.file
+	f.exit
+fi
+
+if [ "$NOMINE" -eq "0" ]; then
+	TIMEOUT="25"
+	if [ -d "/proc/scsi/usb-storage" ]; then
+		TIMEOUT="45"
+		sleep 10
+	fi
+else
+	f.exit 
+fi
+
+if [ "$DRIVER" = "fglrx" ] || [ "$DRIVER" = "amdgpu" ];then
+	timeout -s KILL $TIMEOUT /usr/bin/clinfo > /dev/null
+	if [ $? -ne "0" ];then
+		ERR="HARDWARE ERROR! POSSIBLE GPU / RISER / POWER ISSUE | SEE http://ethosdistro.com/kb/#adl"
+		echo "1" > /var/run/ethos/adl_error.file
+		f.exit
+	fi
+	if [ "$DRIVER" = "fglrx" ] && [ "$NEEDAMDGPU" = "0" ];then
+		timeout -s KILL $TIMEOUT /usr/local/bin/atitweak -s 
+		if [ $? -ne "0" ]; then
+			ERR="HARDWARE ERROR! POSSIBLE GPU / RISER / POWER ISSUE | SEE http://ethosdistro.com/kb/#adl"
+			echo "1" > /var/run/ethos/adl_error.file
+			f.exit
+		fi
+	fi
+fi

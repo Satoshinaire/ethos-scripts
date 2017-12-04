@@ -1,0 +1,339 @@
+#!/bin/bash
+# LICENSE AGREEMENT
+#
+# Version 1.2 (c) 2016-2017 Dale Chapman, sling00@gmail.com ("Author").
+#
+# By using this file, you agree to the following:
+#
+# This file has been licensed to gpuShack for the exclusive use and distribution as part of ethOS. All other previous licenses
+# of this file have been revoked. This license does not expire and allows for any modification, distribution, and/or derivative work
+# by gpuShack and by the Author. This license extends to gpuShack's owners, operators, officers, and contractors, where
+# applicable.
+#
+# The Author expressly forbids and revokes usage of this file, as well as any previous iterations of this file, in any
+# operating system other than ethOS. Any fork of ethOS, third party or otherwise, may not use this file without express written
+# permission from the Author.
+#
+# Personal Use
+#
+# End users may modify and use this script for personal use, but may not redistribute or include in a larger work, in whole, or
+# in part, without express written permission from the Author.
+#
+# Version History
+#
+# v1.2 ethOS RELEASE
+# v1.1 NVIDIA SUPPORT ADDED
+# v1.0 AMD ONLY (initial release)
+
+export NO_AT_BRIDGE=1
+sudo touch /var/log/ethos-overclock.log
+sudo chown ethos.ethos /var/log/ethos-overclock.log
+
+function DATE() {
+	echo "$(date -u)"
+}
+echo "$(DATE) - ethOS-overclock started" | tee /var/log/ethos-overclock.log
+ORIGINALTTY=$(tty)
+exec 1>>/var/log/ethos-overclock.log
+exec 2>>/var/log/ethos-overclock.log
+export DISPLAY=:0 >/dev/null 2>&1
+SERIES=$(/opt/ethos/sbin/ethos-readdata bios)
+SERIES=($SERIES)
+GPUCOUNT=$(</var/run/ethos/gpucount.file)
+CONFFILE="/home/ethos/local.conf"
+MYNAME=$(/sbin/ifconfig | grep -e HW -e eth0 | head -1 | awk '{print $NF}' | sed 's/://g' | tail -c 7)
+MYCORES=( $(grep -Poi "(?<=^cor.$HOSTNAME)\s+(.*)" "$CONFFILE" | xargs) )
+MYMEM=( $(grep -Poi "(?<=^mem.$HOSTNAME)\s+(.*)" "$CONFFILE" | xargs) )
+MYFAN=( $(grep -Poi "(?<=^fan.$HOSTNAME)\s+(.*)" "$CONFFILE" | xargs) )
+MYPOWERTUNE=( $(grep -Poi "(?<=^pwr.$HOSTNAME)\s+(.*)" "$CONFFILE" | xargs) )
+GLOBALFAN=$(grep -Poi "(?<=^globalfan)\s+(.*)" "$CONFFILE" | xargs)
+GLOBALCORE=$(grep -Poi "(?<=^globalcore)\s+(.*)" "$CONFFILE" | xargs)
+GLOBALMEM=$(grep -Poi "(?<=^globalmem)\s+(.*)" "$CONFFILE" | xargs)
+GLOBALPTUNE=$(grep -Poi "(?<=^globalpowertune)\s+(.*)" "$CONFFILE" | xargs)
+OVERRIDE=$(grep -Poi "(?<=^override)\s+(.*)" "$CONFFILE" | xargs)
+
+## Setup the series data and gpucount array
+for ((I=0;I<GPUCOUNT;I++));do
+	GPUS[$I]=$I
+	SERIESCORE[$I]=$(grep -m 1 -Poi "(?<=^cor.${SERIES[$I]})\s+(.*)" "$CONFFILE" | xargs)
+	SERIESMEM[$I]=$(grep -m 1 -Poi "(?<=^mem.${SERIES[$I]})\s+(.*)" "$CONFFILE" | xargs)
+	SERIESFAN[$I]=$(grep -m 1 -Poi "(?<=^fan.${SERIES[$I]})\s+(.*)" "$CONFFILE" | xargs)
+	SERIESPOWERTUNE[$I]=$(grep -m 1 -Poi "(?<=^pwr.${SERIES[$I]})\s+(.*)" "$CONFFILE" | xargs)
+	#echo "GPU $I: BIOS: ${SERIES[$I]} CORE: ${SERIESCORE[$I]} MEM: ${SERIESMEM[$I]} FAN: ${SERIESFAN[$I]} POWERTUNE: ${SERIESPOWERTUNE[$I]}"
+done
+## End series/gpucount data setup
+
+/opt/ethos/bin/check-xorg
+if [ "$1" = "boot" ];then
+	echo "Waiting for display manager to finish starting, 15 seconds...."
+	## Give nodm 15 seconds to actually *start* X
+	sleep 15
+fi
+
+DEFAULTCORE=( $(cat /var/run/ethos/defaultcore.file ) )
+DEFAULTMEM=( $(cat /var/run/ethos/defaultmem.file ) )
+
+if [ "$1" = "boot" ]; then
+        
+        DEFAULTCORE=( $(cat /var/run/ethos/gpudata.file | grep -A60 "gpu:" | grep -A2 perf=2 | grep -Poi "(?<=nvclockmax\=)(\d+)" | xargs | tee /var/run/ethos/defaultcore.file ) )
+        DEFAULTMEM=( $(cat /var/run/ethos/gpudata.file | grep -A60 "gpu:" | grep -A2 perf=2 | grep -Poi "(?<=memclockmax\=)(\d+)" | xargs | tee /var/run/ethos/defaultmem.file ) )
+        /usr/sbin/service ethos-miner-daemon start 
+        echo "Waiting for GPUs to be ready..."
+        COUNT="0"
+        until [ "${#DEFAULTCORE[@]}" = "$GPUCOUNT" -a "${#DEFAULTMEM[@]}" = "$GPUCOUNT" -o "$COUNT" = "300" ]; do
+                DEFAULTCORE=( $(cat /var/run/ethos/gpudata.file | grep -A60 "gpu:" | grep -A2 perf=2 | grep -Poi "(?<=nvclockmax\=)(\d+)" | xargs | tee /var/run/ethos/defaultcore.file ) )
+                DEFAULTMEM=( $(cat /var/run/ethos/gpudata.file | grep -A60 "gpu:" | grep -A2 perf=2 | grep -Poi "(?<=memclockmax\=)(\d+)" | xargs | tee /var/run/ethos/defaultmem.file ) )
+                sleep 1
+                COUNT=$((COUNT+1))  
+        done
+fi
+
+/usr/bin/sudo /usr/bin/nvidia-smi -pm 1
+/usr/bin/sudo /usr/bin/nvidia-smi -acp 0
+if [ -n "/var/run/ethos/nvidia-smi-dump.file" ];then
+	timeout -s KILL 15 /usr/bin/nvidia-smi -q > /var/run/ethos/nvidia-smi-dump.file
+fi
+#Override begin
+if [ ! -z "$OVERRIDE" ] && [ "$OVERRIDE" = "yes" ];then
+	echo "Override enabled, All overclocking disabled."
+	exit 0
+fi
+#Override end
+
+## Fan
+for I in ${!GPUS[*]}; do
+	VALIDPOWERMIN=( $(cat /var/run/ethos/nvidia-smi-dump.file | tr -s [[:space:]] | grep -Poi "(?<=Min\sPower\sLimit\s:\s)(\d+\.\d+)" | sed -e 's/\.[0-9][0-9]//g' | xargs | tee /var/run/ethos/watt_min.file) )
+	VALIDPOWERMAX=( $(cat /var/run/ethos/nvidia-smi-dump.file | tr -s [[:space:]] | grep -Poi "(?<=Max\sPower\sLimit\s:\s)(\d+\.\d+)" | sed -e 's/\.[0-9][0-9]//g' | xargs | tee /var/run/ethos/watt_max.file ) )
+	DEFAULTPOWERLIMIT=( $(cat /var/run/ethos/nvidia-smi-dump.file | tr -s [[:space:]] | grep -Poi "(?<=Default\sPower\sLimit\s:\s)(\d+\.\d+)" | sed -e 's/\.[0-9][0-9]//g' | xargs) )
+
+if [ ! -z "${MYFAN[$I]}" ];then
+	FANTYPE[$I]="Rig Specific"
+	SETFAN[$I]="${MYFAN[$I]}"
+elif [ -z "${MYFAN[$I]}" ] && [ ! -z "${SERIESFAN[$I]}" ];then
+	FANTYPE[$I]="Series based"
+	SETFAN[$I]="${SERIESFAN[$I]}" 
+elif [ -z "${MYFAN[$I]}" ] && [ -z "${SERIESFAN[$I]}" ] && [ ! -z "$GLOBALFAN" ];then
+	FANTYPE[$I]="Global"
+	SETFAN[$I]="$GLOBALFAN"
+fi
+
+if [ ! -z "${SETFAN[$I]}" ];then
+	if [ "${SETFAN[$I]}" -le "100" ] && [ "${SETFAN[$I]}" -ge "0" ];then
+		echo "Applying ${FANTYPE[$I]} Fan settings to GPU$I Value: ${SETFAN[$I]}"
+		/usr/bin/sudo /usr/bin/nvidia-settings -a [gpu:"$I"]/GPUFanControlState=1 -a [fan:"$I"]/GPUTargetFanSpeed="${SETFAN[$I]}"
+		sleep 0.1
+	else
+		echo "${FANTYPE[$I]} setting of ${SETFAN[$I]} is out of range, valid values are 0-100, setting to 100%"
+		FANTYPE[$I]="INVALID"
+		SETFAN[$I]="100"
+		/usr/bin/sudo /usr/bin/nvidia-settings -a [gpu:"$I"]/GPUFanControlState=1 -a [fan:"$I"]/GPUTargetFanSpeed=100
+		sleep 0.1
+	fi
+else
+	FANTYPE[$I]="Default"
+	echo "No fan settings found for this rig $MYNAME, and no Series/Global fan value defined. Not changing fan settings for GPU$I."
+fi
+
+## Powertune - Fglrx / DPM State - Amdgpu / Power limit - Nvidia
+if [ ! -z "${MYPOWERTUNE[$I]}" ];then
+	PTYPE[$I]="Rig Specific"
+	SETPTUNE[$I]="${MYPOWERTUNE[$I]}"
+elif [ -z "${MYPOWERTUNE[$I]}" ] && [ ! -z "${SERIESPOWERTUNE[$I]}" ];then
+	PTYPE[$I]="Series based"
+	SETPTUNE[$I]="${SERIESPOWERTUNE[$I]}"
+elif [ -z "${MYPOWERTUNE[$I]}" ] && [ -z "${SERIESPOWERTUNE[$I]}" ] && [ ! -z "$GLOBALPTUNE" ];then
+	PTYPE[$I]="Global"
+	SETPTUNE[$I]="$GLOBALPTUNE"
+else
+	PTYPE[$I]="Default"
+	SETPTUNE[$I]=""
+fi
+if [ ! -z "${SETPTUNE[$I]}" ];then
+	if [ "${SETPTUNE[$I]}" -ge "${VALIDPOWERMIN[$I]}" ] && [ "${SETPTUNE[$I]}" -le "${VALIDPOWERMAX[$I]}" ];then
+		echo "Applying ${PTYPE[$I]} Powertune setting to GPU$I Value: ${SETPTUNE[$I]}"
+		/usr/bin/sudo /usr/bin/nvidia-smi -i $I -pl "${SETPTUNE[$I]}"
+	else
+		echo "${PTYPE[$I]} Powertune setting ${SETPTUNE[$I]} out of range for GPU$I, accepts ${VALIDPOWERMIN[$I]} - ${VALIDPOWERMAX[$I]} not adjusting value on gpu$I"
+		PTYPE[$I]="INVALID"
+		SETPTUNE[$I]="${DEFAULTPOWERLIMIT[$I]}"
+	fi
+else
+	PTYPE[$I]="Default"
+	SETPTUNE[$I]="${DEFAULTPOWERLIMIT[$I]}"
+	echo "No Powertune settings found for this rig $MYNAME, and no global Powertune value defined. Not changing value for GPU$I."
+fi
+done
+
+function f.9seriesoc(){
+	PCIBUSID=$(/usr/bin/nvidia-smi -i $I --query-gpu=pci.bus_id --format=csv,noheader | sed -e "s/00000000://g" -e "s/, /,/g")
+	# Walk in to the club like What up I got a...
+	BIGCLOCK=$(nvidia-smi -q -d SUPPORTED_CLOCKS | grep -A3 "$PCIBUSID" | grep -A1 -m1 "Memory" | xargs | cut -d" " -f 3,7 | sed 's/ /,/g')
+	/usr/bin/sudo /usr/bin/nvidia-smi -i "$I" -ac "$BIGCLOCK"
+	
+	# Regather offset data as its not present until AC is set.
+	VALIDCOREOFFSET=( $(/usr/bin/nvidia-settings -q [gpu:$I]/GPUGraphicsClockOffset |xargs | grep -Poi "(?<=range\s).*" | cut -d" " -f 1,3 | xargs) )
+	sleep 0.1
+	VALIDMEMOFFSET=( $(/usr/bin/nvidia-settings -q [gpu:$I]/GPUMemoryTransferRateOffset |xargs | grep -Poi "(?<=range\s).*" | cut -d" " -f 1,3 | xargs ) )
+	sleep 0.1
+	# Regather default clocks because they change after application clocks are set
+	DEFAULTCORE[$I]=$(echo "$BIGCLOCK" | cut -d "," -f2)
+	DEFAULTMEM[$I]=$(echo "$BIGCLOCK" | cut -d "," -f1)
+	echo "${DEFAULTCORE[@]}" | xargs > /var/run/ethos/defaultcore.file
+	echo "${DEFAULTMEM[@]}" | xargs > /var/run/ethos/defaultmem.file
+
+}
+
+for I in ${!GPUS[*]}; do
+	PERFLEVEL[$I]=$(/usr/bin/sudo /usr/bin/nvidia-settings -q [gpu:$I]/GPUPerfModes | grep -Poi "(?<=perf=)(\d+)" | tail -1)
+	sleep 0.1
+	VALIDCOREOFFSET=( $(/usr/bin/nvidia-settings -q [gpu:$I]/GPUGraphicsClockOffset |xargs | grep -Poi "(?<=range\s).*" | cut -d" " -f 1,3 | xargs) )
+	sleep 0.1
+	VALIDMEMOFFSET=( $(/usr/bin/nvidia-settings -q [gpu:$I]/GPUMemoryTransferRateOffset |xargs | grep -Poi "(?<=range\s).*" | cut -d" " -f 1,3 | xargs ) )
+	sleep 0.1
+	if [ "${VALIDCOREOFFSET[1]}" = "0" ]; then
+		echo "Preparing NVIDIA 900 series GPU$I for overclocking..."
+		IS9SERIES[$I]="1"
+		f.9seriesoc "$I"
+	else
+		IS9SERIES[$I]="0"
+	fi
+## Core
+if [ ! -z "${MYCORES[$I]}" ];then
+	CTYPE[$I]="Rig Specific"
+	SETCORE[$I]="${MYCORES[$I]}"
+elif [ -z "${MYCORES[$I]}" ] && [ ! -z "${SERIESCORE[$I]}" ];then
+	CTYPE[$I]="Series based"
+	SETCORE[$I]="${SERIESCORE[$I]}"
+elif [ -z "${MYCORES[$I]}" ] && [ -z "${SERIESCORE[$I]}" ] && [ ! -z "$GLOBALCORE" ];then
+	CTYPE[$I]="Global"
+	SETCORE[$I]="$GLOBALCORE"
+else
+	CTYPE[$I]="Default"
+	SETCORE[$I]="0"
+fi
+if [ ! -z "${SETCORE[$I]}" ];then
+	OFFSET[$I]=$(echo ${SETCORE[$I]: 0:1 } | egrep -c "\+|\-" )
+	if [ "${OFFSET[$I]}" -eq "1" ]; then
+		if [ "${SETCORE[$I]}" -ge "${VALIDCOREOFFSET[0]}" ] && [ "${SETCORE[$I]}" -le "${VALIDCOREOFFSET[1]}" ];then
+			echo "Applying ${CTYPE[$I]} Core offset setting ${SETCORE[$I]} to GPU$I."
+			/usr/bin/sudo /usr/bin/nvidia-settings -a [gpu:"$I"]/GPUGraphicsClockOffset[${PERFLEVEL[$I]}]="${SETCORE[$I]}"
+			sleep 0.1
+		else
+			echo "${CTYPE[$I]} Core setting ${SETCORE[$I]} out of range for GPU$I, Not adjusting core clock."
+		fi
+	fi
+	if [ "${OFFSET[$I]}" = "0" ] && [ "${SETCORE[$I]}" -ge "1" ] && [ "${SETCORE[$I]}" -le "4000" ];then
+		echo "Applying ${CTYPE[$I]} Core clock settings to GPU$I Value: ${SETCORE[$I]}"
+		if [ "${SETCORE[$I]}" == "${DEFAULTCORE[$I]}" ]; then
+			echo "${CTYPE[$I]} is the same as the default clock for GPU$I, Not adjusting core clock."
+			SETCOREOFFSET[$I]="0"
+		elif [ "${SETCORE[$I]}" -ne "${DEFAULTCORE[$I]}" ];then
+			SETCOREOFFSET[$I]=$(echo "${SETCORE[$I]}" - "${DEFAULTCORE[$I]}" | bc -l)
+		fi
+		VCMIN=$(echo ${DEFAULTCORE[$I]} + ${VALIDCOREOFFSET[0]} | bc -l)
+		VCMAX=$(echo ${DEFAULTCORE[$I]} + ${VALIDCOREOFFSET[1]} | bc -l)
+		if [ "${VALIDCOREOFFSET[1]}" != "0" ] && [ "${SETCOREOFFSET[$I]}" -lt "${VALIDCOREOFFSET[0]}" ];then
+			echo "${CTYPE[$I]} is out of range, must be between $VCMIN and $VCMAX"
+			SETCOREOFFSET[$I]="${VALIDCOREOFFSET[0]}"
+			SETCORE[$I]="$VCMIN"
+		fi
+		if [ "${VALIDCOREOFFSET[1]}" != "0" ] && [ "${SETCOREOFFSET[$I]}" -gt "${VALIDCOREOFFSET[1]}" ]; then
+			echo "${CTYPE[$I]} is out of range, must be between $VCMIN and $VCMAX"
+			SETCOREOFFSET[$I]="200"
+			SETCORE[$I]="$VCMAX"
+		fi
+		/usr/bin/sudo /usr/bin/nvidia-settings -a [gpu:"$I"]/GPUGraphicsClockOffset[${PERFLEVEL[$I]}]="${SETCOREOFFSET[$I]}"
+		sleep 0.1
+	elif [ ${SETCORE[$I]} = "0" ];then
+		echo "No Core clock settings found for this rig $MYNAME, and no global value defined. Not adjusting core clock for GPU$I."
+		CTYPE[$I]="Default"
+		SETCORE[$I]="${DEFAULTCORE[$I]}"
+	fi
+fi
+
+## Memory
+if [ ! -z "${MYMEM[$I]}" ];then
+	MTYPE[$I]="Rig Specfic"
+	SETMEM[$I]="${MYMEM[$I]}"
+elif [ -z "${MYMEM[$I]}" ] && [ ! -z "${SERIESMEM[$I]}" ];then
+	MTYPE[$I]="Series Based"
+	SETMEM[$I]="${SERIESMEM[$I]}"
+elif [ -z "${MYMEM[$I]}" ] && [ -z "${SERIESMEM[$I]}" ] && [ ! -z "$GLOBALMEM" ];then
+	MTYPE[$I]="Global"
+	SETMEM[$I]="$GLOBALMEM"
+else
+	MTYPE[$I]="Default"
+	SETMEM[$I]=""
+fi
+if [ ! -z "${SETMEM[$I]}" ];then
+	OFFSETMEM[$I]=$(echo "${SETMEM[$I]: 0:1 }" |egrep -c "\+|\-" )
+	if [ "${OFFSETMEM[$I]}" -eq "1" ];then
+		if [ "${SETMEM[$I]}" -le "${VALIDMEMOFFSET[1]}" ] && [ "${SETMEM[$I]}" -ge "${VALIDMEMOFFSET[0]}" ];then
+			echo "Applying ${MTYPE[$I]} Memory offset setting ${SETMEM[$I]} to GPU$I."
+			if [ "${IS9SERIES[$I]}" = "1" ]; then
+				SETMEMNV[$I]="${SETMEM[$I]}"
+			else
+				SETMEMNV[$I]=$((${SETMEM[$I]}*2))
+			fi
+			/usr/bin/sudo /usr/bin/nvidia-settings -a [gpu:"$I"]/GPUMemoryTransferRateOffset["${PERFLEVEL[$I]}"]="${SETMEMNV[$I]}"
+			sleep 0.1
+		else
+			echo "${MTYPE[$I]} Memory offset setting ${SETMEM[$I]} out of range for gpu $I, Not adjusting memory clock"
+		fi
+	fi
+	if [ "${OFFSETMEM[$I]}" = "0" ] && [ "${SETMEM[$I]}" -le "10000" ] && [ "${SETMEM[$I]}" -ge "1" ];then
+		if [ "${SETMEM[$I]}" == "${DEFAULTMEM[$I]}" ];then
+			echo "${MTYPE[$I]} is the same as the default clock for GPU$I, Not adjusting mem clock."
+			SETMEMOFFSET[$I]="0"
+		elif [ "${SETMEM[$I]}" -ne "${DEFAULTMEM[$I]}" ]; then
+			SETMEMOFFSET[$I]=$(echo "${SETMEM[$I]}" - "${DEFAULTMEM[$I]}" | bc -l)
+		fi
+		VMMIN=$(echo ${DEFAULTMEM[$I]} + ${VALIDMEMOFFSET[0]} | bc -l)
+		VMMAX=$(echo ${DEFAULTMEM[$I]} + ${VALIDMEMOFFSET[1]} | bc -l)
+		if [ "${IS9SERIES[$I]}" = "1" ]; then
+				SETMEMOFFSET[$I]="${SETMEMOFFSET[$I]}"
+		else
+				SETMEMOFFSET[$I]=$((${SETMEMOFFSET[$I]}*2))
+		fi
+		if [ "${VALIDMEMOFFSET[1]}" != "0" ] && [ "${SETMEMOFFSET[$I]}" -lt "${VALIDMEMOFFSET[0]}" ]; then
+			echo "${MTYPE[$I]} is out of range, must be between $VMMIN and $VMMAX"
+			SETMEMOFFSET[$I]="${VALIDMEMOFFSET[0]}"
+			SETMEM[$I]="$VMMIN"
+		fi
+		if [ "${VALIDMEMOFFSET[1]}" != "0" ] && [ "${SETMEMOFFSET[$I]}" -gt "${VALIDMEMOFFSET[1]}" ]; then
+			echo "${MTYPE[$I]} is out of range, must be between $VMMIN and $VMMAX"
+			SETMEMOFFSET[$I]="${VALIDMEMOFFSET[1]}"
+			SETMEM[$I]="$VMMAX"
+		fi
+		echo "Applying ${MTYPE[$I]} Memory clock settings to GPU$I Value: ${SETMEM[$I]}"
+		/usr/bin/sudo /usr/bin/nvidia-settings -a [gpu:"$I"]/GPUMemoryTransferRateOffset[${PERFLEVEL[$I]}]="${SETMEMOFFSET[$I]}"
+		sleep 0.1
+	fi
+else
+	MTYPE[$I]="Default"
+	SETMEM[$I]="${DEFAULTMEM[$I]}"
+	echo "No Memory clock settings found for this rig $MYNAME, and no global value defined. Not adjusting memory clock for GPU$I."
+fi
+
+done
+
+echo "------------------------------------ Ethos Overclock Summary ------------------------------------"
+for I in "${GPUS[@]}";do
+if [ -z "${SETFAN[$I]}" ];then
+	SETFAN[$I]="bios"
+fi
+if [ -z "${SETVOLT[$I]}" ];then
+	SETVOLT[$I]="Auto"
+fi
+DATA[$I]="|-GPU ${GPUS[$I]}|;${CTYPE[$I]} Core:;${SETCORE[$I]};${MTYPE[$I]} Memory:;${SETMEM[$I]};${PTYPE[$I]} Powertune:;${SETPTUNE[$I]};${FANTYPE[$I]} Fan:;${SETFAN[$I]};"
+done
+printf "%s\n" "${DATA[@]}" | column -t -s ";"
+echo "|________________________________________________________________________________________________"
+
+if [ ! -z "$ORIGINALTTY" ] && [ "$ORIGINALTTY" != "not a tty" ];then
+	exec 1>"$ORIGINALTTY"
+	exec 2>"$ORIGINALTTY"
+	echo "$(DATE) - ethOS-overclock finished"
+fi
+
+echo "$(DATE) - ethOS-overclock finished" >> /var/log/ethos-overclock.log

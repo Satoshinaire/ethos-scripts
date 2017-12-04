@@ -1,0 +1,14 @@
+#!/usr/bin/env php
+<?php
+
+include("/opt/ethos/lib/minerprocess.php");
+
+file_put_contents("/opt/ethos/etc/allow.file","1");
+
+check_status();
+
+$status = trim(file_get_contents("/var/run/ethos/status.file"));
+
+echo $status."\n";
+
+?>

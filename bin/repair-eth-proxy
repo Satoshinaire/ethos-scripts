@@ -1,0 +1,26 @@
+#!/bin/bash
+if [[ $EUID -ne 0 ]]; then
+  echo "This script must be run as root, please relaunch using \"sudo repair-eth-proxy\""
+  exit 1
+fi
+ETHOSVERSION=$(cat /opt/ethos/etc/version)
+echo "Attempting to repair eth-proxy"
+mv /opt/eth-proxy /tmp/eth-proxy.bak
+mkdir -p /opt/eth-proxy
+wget http://update.ethosdistro.com/ethos-updates/ethos-update/ethos-update/proxy-updates/$ETHOSVERSION/eth-proxy.tar.bz2 -O /tmp/eth-proxy.tar.bz2
+if [ $? = "0" ]; then
+	tar xjpf /tmp/eth-proxy.tar.bz2 -C /opt/
+	if [ $? = "0" ]; then
+		echo "Proxy repair finished, type restart-proxy to restart the proxy."
+		exit 0
+	else
+		echo "Failed to extract eth-proxy tarball, Proxy repair incomplete, restoring old proxy."
+		rm -rf /opt/eth-proxy
+		mv /tmp/eth-proxy.bak /opt/eth-proxy
+	fi
+else
+	echo "eth-proxy failed to download, try again in a few minutes or check your network connection."
+fi
+
+chown -R ethos.ethos /opt/eth-proxy
+

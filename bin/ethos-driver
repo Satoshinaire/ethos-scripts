@@ -1,0 +1,17 @@
+#!/bin/bash
+case "$1" in 
+  off )
+    echo "1" > /var/run/ethos/driverless.file
+    sudo /usr/sbin/grub-reboot 4
+    echo "Driver off, reboot for changes to take effect"
+  ;;
+  on )
+  echo "" > /var/run/ethos/driverless.file
+  sudo /usr/sbin/grub-reboot 0
+  echo "Driver on, reboot for changes to take effect"
+  ;;
+  * )
+    echo "Usage: ethos-driver on  - enables amd driver"
+    echo "       ethos-driver off - disables amd driver"
+  ;; 
+esac

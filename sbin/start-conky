@@ -1,0 +1,8 @@
+#!/bin/bash
+#export DISPLAY=:0
+
+`/opt/ethos/bin/bootlog start-conky`;
+
+exec 1>> /dev/null
+exec 2>> /dev/null
+sudo -Eu ethos bash -c "export HOME="/home/ethos" && export DISPLAY=:0 && /usr/bin/conky -p 3 -c /home/ethos/.conkyrc >> /dev/null &"

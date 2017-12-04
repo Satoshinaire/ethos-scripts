@@ -1,0 +1,56 @@
+#!/bin/bash
+function f.mountefi(){
+	PARTITION=$(sudo blkid | grep "UUID=\"f96c3164-6f44-43b3-be09-d8cfed4934ea\"" | cut -d":" -f1)
+	DRIVE=${PARTITION: :-1}
+	ESP=$(blkid | grep "$DRIVE" | grep "ESP" | cut -d":" -f1)
+	sudo mount $ESP /boot/efi
+	if [ "$?" = "0" ]; then
+		echo "EFI Partition Mounted"
+	else
+		echo "Couldn't mount EFI partition, uefi values wont be changed."
+	fi
+}
+function f.unmountefi(){
+        echo "Syncing disks and unmounting ESP"
+        sync
+        sleep 2
+        sudo umount /boot/efi
+        echo "Done updating uefi boot command line"
+}
+function f.enable(){
+	f.mountefi
+	LOGRAMDISK=$(grep -c "#tmpfs   /var/log    tmpfs    defaults,noatime,nosuid,mode=0755,size=100m    0 0" /etc/fstab)
+	if [ "$LOGRAMDISK" = "0" ]; then
+		sudo sed -i 's/^tmpfs   \/var\/log    tmpfs    defaults,noatime,nosuid,mode=0755,size=100m    0 0/#tmpfs   \/var\/log    tmpfs    defaults,noatime,nosuid,mode=0755,size=100m    0 0/g' /etc/fstab
+		sudo sed -i 's/ --no-log//g' /etc/default/grub
+		sudo update-grub
+		sudo sed -i 's/pci=noaer --no-log quiet loglevel=3\"/pci=noaer"/g' /boot/efi/EFI/BOOT/refind.conf
+		f.unmountefi
+		echo "Persistent logging is now Enabled. reboot for changes to take effect"
+		exit 0
+	fi
+}
+function f.disable(){
+	f.mountefi
+	LOGRAMDISK2=$(grep -c "^tmpfs   /var/log    tmpfs    defaults,noatime,nosuid,mode=0755,size=100m    0 0" /etc/fstab)
+	if [ "$LOGRAMDISK2" = "0" ]; then
+		sudo sed -i 's/#tmpfs   \/var\/log    tmpfs    defaults,noatime,nosuid,mode=0755,size=100m    0 0/tmpfs   \/var\/log    tmpfs    defaults,noatime,nosuid,mode=0755,size=100m    0 0/g' /etc/fstab
+		sudo sed -i 's/iommu="soft"/iommu="soft" --no-log/g' /etc/default/grub
+		sudo update-grub
+		sudo sed -i 's/pci=noaer\"/pci=noaer --no-log quiet loglevel=3"/g' /boot/efi/EFI/BOOT/refind.conf
+		f.unmountefi
+		echo "Persistent logging is now Disabled. reboot for changes to take effect"
+		exit 0
+	fi
+}
+case "$1" in
+	enabled )
+		f.enable
+	;;
+	disabled )
+		f.disable
+	;;
+esac
+
+f.enable
+f.disable
