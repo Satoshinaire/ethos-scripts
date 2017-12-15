@@ -46,8 +46,8 @@ function get_hashrates(){
 	}
 	
 	if($miner == "ccminer") {
-		`echo "threads|" | socat stdio tcp-connect:127.0.0.1:4068 > /var/run/ethos/miner.dump`;
                 preg_match_all("/KHS=(\d+\.\d+)/", @file_get_contents("/var/run/ethos/miner.dump"), $ccminer_hashes);
+		`echo "threads|" | socat -t5 stdio tcp-connect:127.0.0.1:4068 > /var/run/ethos/miner.dump`;
 	}
 
 	if($miner == "dstm-zcash") {
